@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RSVP Reader with Highlight</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 2rem;
+      background: #121212;
+      color: #eee;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    #display {
+      font-size: 4rem;
+      font-weight: bold;
+      text-align: center;
+      height: 6rem;
+      margin-bottom: 2rem;
+      min-width: 20rem;
+    }
+
+    .input-wrapper {
+      position: relative;
+      width: 80%;
+      margin-bottom: 1rem;
+    }
+
+    #highlightLayer,
+    #textInput {
+      font-family: monospace;
+      font-size: 1.2rem;
+      line-height: 1.5;
+      padding: 0.5rem;
+      border-radius: 6px;
+      width: 100%;
+      height: 400px;
+      overflow-y: scroll;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    #highlightLayer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      color: #aaa;
+      background-color: #1e1e1e;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #textInput {
+      position: relative;
+      background: transparent;
+      color: white;
+      border: none;
+      resize: none;
+      z-index: 1;
+    }
+
+    .highlight {
+      background: brown;
+      color: black;
+    }
+
+    label {
+      margin-bottom: 0.5rem;
+      display: block;
+      width: 80%;
+    }
+
+    input[type=range] {
+      width: 80%;
+      margin-bottom: 1rem;
+    }
+
+    button {
+      padding: 0.7rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      background: #0a84ff;
+      color: white;
+      transition: background 0.3s;
+      margin-right: 0.5rem;
+    }
+
+    button:hover {
+      background: #0066cc;
+    }
+
+    #controls {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="display">Paste your text below and press Start</div>
+
+  <div class="input-wrapper">
+    <div id="highlightLayer"></div>
+    <textarea id="textInput" placeholder="Paste or type your text here..."></textarea>
+  </div>
+
+  <label for="speedControl">Speed (words per minute): <span id="speedValue">300</span></label>
+  <input type="range" id="speedControl" min="100" max="1000" value="300" />
+
+  <label for="positionControl">Position in text: <span id="positionValue">0</span> / <span id="totalWords">0</span></label>
+  <input type="range" id="positionControl" min="1" max="1" value="1" disabled />
+
+  <div id="controls">
+    <button id="startBtn">Start</button>
+    <button id="stopBtn" disabled>Stop</button>
+  </div>
+
+  <script>
+    const display = document.getElementById('display');
+    const textInput = document.getElementById('textInput');
+    const highlightLayer = document.getElementById('highlightLayer');
+    const speedControl = document.getElementById('speedControl');
+    const speedValue = document.getElementById('speedValue');
+    const positionControl = document.getElementById('positionControl');
+    const positionValue = document.getElementById('positionValue');
+    const totalWordsSpan = document.getElementById('totalWords');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+
+    let words = [];
+    let index = 0;
+    let intervalId = null;
+    let isUserSeeking = false;
+
+    function updateHighlight() {
+      const text = textInput.value;
+      if (!text) {
+        highlightLayer.innerHTML = "";
+        return;
+      }
+
+      const tokens = text.split(/(\s+)/); // split into words and spaces
+      let highlightedHTML = "";
+      let wordCounter = 0;
+
+      for (let token of tokens) {
+        if (token.trim().length === 0) {
+          highlightedHTML += token;
+        } else {
+          if (wordCounter === index) {
+            highlightedHTML += `<span class="highlight">${token}</span>`;
+          } else {
+            highlightedHTML += token;
+          }
+          wordCounter++;
+        }
+      }
+
+      highlightLayer.innerHTML = highlightedHTML;
+      highlightLayer.scrollTop = textInput.scrollTop;
+    }
+
+    function showWord() {
+      if (index >= words.length) {
+        clearInterval(intervalId);
+        intervalId = null;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        return;
+      }
+
+      display.textContent = words[index];
+      positionControl.value = index + 1;
+      positionValue.textContent = index + 1;
+      updateHighlight();
+      index++;
+    }
+
+    function startReading() {
+      const text = textInput.value.trim();
+      const newWords = text.split(/\s+/);
+      if (words.length === 0 || newWords.join(" ") !== words.join(" ")) {
+        words = newWords;
+        index = 0;
+        positionControl.min = 1;
+        positionControl.max = words.length;
+        totalWordsSpan.textContent = words.length;
+      }
+      if (index >= words.length) index = 0;
+
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      positionControl.disabled = false;
+
+      showWord();
+      const wpm = parseInt(speedControl.value, 10);
+      const interval = 60000 / wpm;
+      intervalId = setInterval(() => {
+        if (!isUserSeeking) showWord();
+      }, interval);
+    }
+
+    function stopReading() {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+      }
+    }
+
+    speedControl.addEventListener('input', () => {
+      speedValue.textContent = speedControl.value;
+      if (intervalId) {
+        clearInterval(intervalId);
+        const wpm = parseInt(speedControl.value, 10);
+        const interval = 60000 / wpm;
+        intervalId = setInterval(() => {
+          if (!isUserSeeking) showWord();
+        }, interval);
+      }
+    });
+
+    positionControl.addEventListener('input', () => {
+      isUserSeeking = true;
+      index = parseInt(positionControl.value, 10) - 1;
+      positionValue.textContent = positionControl.value;
+      display.textContent = words[index] || "";
+      updateHighlight();
+    });
+
+    positionControl.addEventListener('change', () => {
+      isUserSeeking = false;
+    });
+
+    textInput.addEventListener('scroll', () => {
+      highlightLayer.scrollTop = textInput.scrollTop;
+    });
+
+    textInput.addEventListener('input', () => {
+      updateHighlight();
+    });
+
+    startBtn.addEventListener('click', startReading);
+    stopBtn.addEventListener('click', stopReading);
+
+document.addEventListener('keydown', (e) => {
+  // Ignore if focus is inside the textarea
+  if (document.activeElement === textInput) return;
+
+  if (e.code === 'Space') {
+    e.preventDefault(); // prevent page scroll
+    if (intervalId) {
+      stopReading();
+    } else {
+      startReading();
+    }
+  }
+});
+  </script>
+
+</body>
+</html>
