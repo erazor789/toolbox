@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Alarm Clock with Snooze</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      padding-top: 50px;
+      background: #121212;
+      color: #f0f0f0;
+    }
+    #clock {
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+    input, button, label {
+      font-size: 16px;
+      padding: 5px;
+      margin: 5px;
+    }
+    button {
+      background-color: #4CAF50;
+      color: white;
+      border: none;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:hover {
+      background-color: #388e3c;
+    }
+    .status {
+      margin-top: 20px;
+      font-size: 18px;
+      color: #ffa726;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="clock">--:--:--</div>
+
+  <label for="alarmTime">Set Alarm:</label>
+  <input type="time" id="alarmTime">
+  <label><input type="checkbox" id="recurring"> Repeat Daily</label>
+  <br>
+  <button onclick="setAlarm()">Set Alarm</button>
+  <button onclick="clearAlarm()">Clear Alarm</button>
+  <button onclick="snoozeAlarm()">Snooze</button>
+
+  <div class="status" id="statusText">No alarm set.</div>
+
+  <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/alarm_clock.ogg" preload="auto"></audio>
+
+  <script>
+    const clock = document.getElementById('clock');
+    const alarmSound = document.getElementById('alarmSound');
+    const statusText = document.getElementById('statusText');
+    let alarmTime = null;
+    let isRecurring = false;
+    let snoozeTimeout = null;
+
+    // Update current time every second
+    setInterval(() => {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+      clock.textContent = timeStr;
+
+      const currentTime = timeStr.slice(0, 5); // hh:mm
+      if (alarmTime && currentTime === alarmTime) {
+        triggerAlarm();
+      }
+    }, 1000);
+
+    function setAlarm() {
+      const input = document.getElementById('alarmTime').value;
+      isRecurring = document.getElementById('recurring').checked;
+
+      if (input) {
+        alarmTime = input;
+        statusText.textContent = `Alarm set for ${alarmTime} ${isRecurring ? '(Daily)' : ''}`;
+      }
+    }
+
+    function clearAlarm() {
+      alarmTime = null;
+      clearTimeout(snoozeTimeout);
+      statusText.textContent = 'Alarm cleared.';
+    }
+
+    function snoozeAlarm() {
+      if (!alarmTime) return;
+      clearTimeout(snoozeTimeout);
+
+      const [h, m] = alarmTime.split(':').map(Number);
+      const snoozeDate = new Date();
+      snoozeDate.setHours(h);
+      snoozeDate.setMinutes(m + 5); // add 5 minutes
+      snoozeDate.setSeconds(0);
+
+      let snoozeHours = snoozeDate.getHours().toString().padStart(2, '0');
+      let snoozeMinutes = snoozeDate.getMinutes().toString().padStart(2, '0');
+      alarmTime = `${snoozeHours}:${snoozeMinutes}`;
+
+      statusText.textContent = `Snoozed to ${alarmTime}`;
+    }
+
+    function triggerAlarm() {
+      alarmSound.play();
+      alert('⏰ Alarm ringing!');
+
+      if (!isRecurring) {
+        alarmTime = null;
+        statusText.textContent = 'Alarm completed.';
+      }
+    }
+  </script>
+
+</body>
+</html>
