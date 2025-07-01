@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Smooth Teleprompter</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #121212;
+      color: #eee;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      padding: 1rem;
+      box-sizing: border-box;
+      align-items: center;
+    }
+
+    textarea {
+      width: 80%;
+      max-height: 150px;
+      font-size: 1.2rem;
+      line-height: 1.5;
+      padding: 0.5rem;
+      border-radius: 6px;
+      border: none;
+      resize: vertical;
+      background: #1e1e1e;
+      color: #eee;
+      margin-bottom: 1rem;
+      flex-shrink: 0;
+    }
+
+    #teleprompter {
+      position: relative;
+      width: 80%;
+      flex-grow: 1;
+      overflow: auto;
+      border-radius: 6px;
+      background: #1e1e1e;
+      font-size: 48px;
+      line-height: 1.6;
+      padding: 20px;
+      box-sizing: border-box;
+      user-select: none;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+
+    #scrollingText {
+      position: relative;
+      width: 100%;
+      white-space: normal;
+      will-change: transform;
+    }
+
+    label {
+      width: 80%;
+      margin: 0.15rem 0 0.1rem 0;
+      display: block;
+      user-select: none;
+      font-weight: 600;
+    }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 80%;
+      height: 24px;
+      margin-bottom: 0.5rem;
+      background: transparent;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    /* Track */
+    input[type="range"]::-webkit-slider-runnable-track {
+      height: 6px;
+      background: #555;
+      border-radius: 3px;
+    }
+
+    input[type="range"]::-moz-range-track {
+      height: 6px;
+      background: #555;
+      border-radius: 3px;
+    }
+
+    /* Thumb */
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      background: #0a84ff;
+      border-radius: 50%;
+      margin-top: -5px;
+      transition: background 0.3s;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      background: #0066cc;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      background: #0a84ff;
+      border-radius: 50%;
+      border: none;
+      transition: background 0.3s;
+    }
+
+    input[type="range"]::-moz-range-thumb:hover {
+      background: #0066cc;
+    }
+
+    /* Compact scrollbars for WebKit browsers */
+    #teleprompter::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    #teleprompter::-webkit-scrollbar-track {
+      background: #1e1e1e;
+      border-radius: 3px;
+    }
+
+    #teleprompter::-webkit-scrollbar-thumb {
+      background-color: #555;
+      border-radius: 3px;
+    }
+
+    /* Compact scrollbars for Firefox */
+    #teleprompter {
+      scrollbar-width: thin;
+      scrollbar-color: #555 #1e1e1e;
+    }
+
+    /* Hide scrollbars on touch devices */
+    @media (hover: none) and (pointer: coarse) {
+      #teleprompter::-webkit-scrollbar {
+        display: none;
+      }
+      #teleprompter {
+        -ms-overflow-style: none;  /* IE and Edge */
+        scrollbar-width: none;  /* Firefox */
+      }
+    }
+
+    /* Smaller font size for labels on small screens */
+    @media (max-width: 600px) {
+      label {
+        font-size: 0.9rem;
+        width: 90%;
+      }
+
+      input[type="range"] {
+        width: 90%;
+        height: 20px;
+      }
+    }
+
+    #sliderControls {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.2rem;
+      margin-bottom: 1rem;
+    }
+
+    #controls {
+      width: 80%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    button {
+      padding: 0.7rem 1.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+      border: none;
+      border-radius: 6px;
+      background: #0a84ff;
+      color: white;
+      transition: background 0.3s;
+      flex-shrink: 0;
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    button:hover {
+      background: #0066cc;
+    }
+
+    /* Smaller buttons for fullscreen and toggle */
+    #fullscreenBtn, #toggleControlsBtn {
+      padding: 0.5rem 0.8rem;
+      font-size: 0.9rem;
+      flex-grow: 0;
+      flex-shrink: 0;
+      min-width: 90px;
+    }
+
+    /* Mobile fix: stack buttons vertically, big toggle start/stop */
+    @media (max-width: 480px) {
+      #controls {
+        flex-direction: column;
+        gap: 0.5rem;
+      }
+      #startStopBtn {
+        width: 100%;
+        font-size: 1.2rem;
+        padding: 1rem;
+      }
+      #fullscreenBtn, #toggleControlsBtn {
+        width: 50%;
+        font-size: 1rem;
+        align-self: center;
+        padding: 0.5rem 0.8rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <textarea id="textInput" placeholder="Paste or type your text here..."></textarea>
+
+    <div id="teleprompter">
+      <div id="scrollingText"></div>
+    </div>
+
+    <div id="sliderControls">
+      <label for="positionControl">Position in text:</label>
+      <input type="range" id="positionControl" min="0" max="100" value="0" />
+
+      <label for="speedControl">Scroll speed (pixels/second):</label>
+      <input type="range" id="speedControl" min="10" max="200" value="50" />
+
+      <label for="fontSizeControl">Font size (px):</label>
+      <input type="range" id="fontSizeControl" min="16" max="128" value="48" />
+    </div>
+
+    <div id="controls">
+      <button id="toggleControlsBtn">Hide Controls</button>
+      <button id="startStopBtn">Start</button>
+      <button id="fullscreenBtn">Fullscreen</button>
+    </div>
+  </div>
+
+  <script>
+    const textInput = document.getElementById('textInput');
+    const scrollingText = document.getElementById('scrollingText');
+    const teleprompter = document.getElementById('teleprompter');
+
+    const sliderControls = document.getElementById('sliderControls');
+
+    const positionControl = document.getElementById('positionControl');
+    const speedControl = document.getElementById('speedControl');
+    const fontSizeControl = document.getElementById('fontSizeControl');
+
+    const toggleControlsBtn = document.getElementById('toggleControlsBtn');
+    const startStopBtn = document.getElementById('startStopBtn');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+    let animationFrameId = null;
+    let lastTimestamp = null;
+    let scrollPos = 0;
+    let isScrolling = false;
+
+    function updateText() {
+      const paddingTop = teleprompter.clientHeight;
+      const rawText = textInput.value || "";
+      scrollingText.innerHTML = `<div style="height:${paddingTop}px;"></div>` + rawText.replace(/\n/g, "<br>");
+      scrollPos = 0;
+      scrollingText.style.transform = `translateY(0px)`;
+      positionControl.value = 0;
+      updatePositionControlMax();
+    }
+
+    function getMaxScroll() {
+      return scrollingText.scrollHeight;
+    }
+
+    function updatePositionControlMax() {
+      const max = getMaxScroll();
+      positionControl.max = max > 0 ? max : 0;
+    }
+
+    positionControl.addEventListener('input', () => {
+      scrollPos = Number(positionControl.value);
+      scrollingText.style.transform = `translateY(-${scrollPos}px)`;
+      if (isScrolling) stopScrolling();
+    });
+
+    fontSizeControl.addEventListener('input', () => {
+      scrollingText.style.fontSize = fontSizeControl.value + 'px';
+      updatePositionControlMax();
+      positionControl.dispatchEvent(new Event('input'));
+    });
+
+    speedControl.addEventListener('input', () => {
+      if (isScrolling) {
+        stopScrolling();
+        startScrolling();
+      }
+    });
+
+    function startScrolling() {
+      if (isScrolling) return;
+      if (!textInput.value.trim()) return alert("Please enter some text first.");
+
+      isScrolling = true;
+      startStopBtn.textContent = 'Stop';
+      lastTimestamp = null;
+      scrollPos = Number(positionControl.value);
+      requestAnimationFrame(step);
+    }
+
+    function stopScrolling() {
+      isScrolling = false;
+      startStopBtn.textContent = 'Start';
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+        animationFrameId = null;
+      }
+    }
+
+    function step(timestamp) {
+      if (!lastTimestamp) lastTimestamp = timestamp;
+      const delta = timestamp - lastTimestamp;
+      lastTimestamp = timestamp;
+
+      const speed = Number(speedControl.value);
+      scrollPos += (speed * delta) / 1000;
+
+      const maxScroll = getMaxScroll();
+      if (scrollPos >= maxScroll) {
+        scrollPos = maxScroll;
+        stopScrolling();
+      }
+
+      scrollingText.style.transform = `translateY(-${scrollPos}px)`;
+      positionControl.value = scrollPos;
+
+      if (isScrolling) animationFrameId = requestAnimationFrame(step);
+    }
+
+    fullscreenBtn.addEventListener('click', () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+      } else {
+        document.exitFullscreen();
+      }
+    });
+
+    toggleControlsBtn.addEventListener('click', () => {
+      if (sliderControls.style.display === 'none') {
+        sliderControls.style.display = 'flex';
+        toggleControlsBtn.textContent = 'Hide Controls';
+      } else {
+        sliderControls.style.display = 'none';
+        toggleControlsBtn.textContent = 'Show Controls';
+      }
+    });
+
+    textInput.addEventListener('input', updateText);
+
+    window.addEventListener('resize', updateText);
+
+    window.addEventListener('load', () => {
+      updateText();
+      scrollingText.style.fontSize = fontSizeControl.value + 'px';
+    });
+
+    startStopBtn.addEventListener('click', () => {
+      if (isScrolling) {
+        stopScrolling();
+      } else {
+        startScrolling();
+      }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (document.activeElement === textInput) return;
+
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault();
+          isScrolling ? stopScrolling() : startScrolling();
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          speedControl.value = Math.min(Number(speedControl.value) + 5, 200);
+          speedControl.dispatchEvent(new Event('input'));
+          break;
+        case 'ArrowDown':
+          e.preventDefault();
+          speedControl.value = Math.max(Number(speedControl.value) - 5, 10);
+          speedControl.dispatchEvent(new Event('input'));
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          positionControl.value = Math.min(Number(positionControl.value) + 20, Number(positionControl.max));
+          positionControl.dispatchEvent(new Event('input'));
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          positionControl.value = Math.max(Number(positionControl.value) - 20, 0);
+          positionControl.dispatchEvent(new Event('input'));
+          break;
+        case 'Equal':
+        case 'NumpadAdd':
+          e.preventDefault();
+          fontSizeControl.value = Math.min(Number(fontSizeControl.value) + 2, 128);
+          fontSizeControl.dispatchEvent(new Event('input'));
+          break;
+        case 'Minus':
+        case 'NumpadSubtract':
+          e.preventDefault();
+          fontSizeControl.value = Math.max(Number(fontSizeControl.value) - 2, 16);
+          fontSizeControl.dispatchEvent(new Event('input'));
+          break;
+      }
+    });
+  </script>
+</body>
+</html>
