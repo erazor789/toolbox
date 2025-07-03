@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Invoice Generator</title>
+
+    <!-- jsPDF Core -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <!-- jsPDF AutoTable Plugin -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #121212;
+            color: #eee;
+            margin: 20px;
+        }
+
+        input, button, textarea {
+            padding: 6px;
+            font-size: 13px;
+            background-color: #1e1e1e;
+            color: #eee;
+            border: 1px solid #444;
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            background-color: #1e1e1e;
+        }
+
+        th, td {
+            border: 1px solid #444;
+            padding: 6px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background-color: #3a4a5a;
+        }
+
+        .btn {
+            padding: 6px 12px;
+            margin-right: 10px;
+            background-color: #333;
+            cursor: pointer;
+        }
+
+            .btn:hover {
+                background-color: #444;
+            }
+
+        .controls {
+            margin-top: 20px;
+        }
+
+        #logoPreview {
+            max-height: 40px;
+            object-fit: contain;
+        }
+
+        .form-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .form-group {
+            flex: 1 1 300px;
+            min-width: 250px;
+        }
+
+            .form-group table {
+                width: 100%;
+            }
+
+            .form-group td {
+                border: none;
+                padding: 4px 8px 4px 0;
+                vertical-align: top;
+            }
+
+            .form-group label {
+                display: inline-block;
+                margin-bottom: 4px;
+            }
+
+        .details-textarea {
+            font-size: 11px;
+            width: calc(100% - 12px);
+            box-sizing: border-box;
+            background-color: #181818;
+            resize: vertical;
+        }
+
+        #invoiceTable input.desc {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        #invoiceTable input.qty,
+        #invoiceTable input.price {
+            width: 60px;
+            box-sizing: border-box;
+        }
+
+        #grandTotalDisplay {
+            text-align: right;
+            margin-top: 10px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        @media print {
+            .controls, button, #logoInput {
+                display: none !important;
+            }
+
+            input, textarea {
+                border: none;
+                background: transparent;
+                color: black;
+            }
+
+            body {
+                background: white;
+                color: black;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <h1 style="display: flex; align-items: center; gap: 4px; margin-bottom: 10px;">
+        <img id="logoPreview" src="" alt="Logo Preview" />
+        <span id="companyNameDisplay">ELLIOT CHAN PRODUCTIONS</span>
+    </h1>
+
+    <div class="form-section">
+        <div class="form-group">
+            <table>
+                <tr><td><label for="companyName">Company Name:</label></td><td><input type="text" id="companyName" value="ELLIOT CHAN PRODUCTIONS" oninput="document.getElementById('companyNameDisplay').textContent = this.value" /></td></tr>
+                <tr><td><label for="logoInput">Upload Logo:</label></td><td><input type="file" id="logoInput" accept="image/*" /></td></tr>
+                <tr><td><label for="invoiceSuffix">Invoice Suffix (e.g. Q, I, R):</label></td><td><input type="text" id="invoiceSuffix" maxlength="3" /></td></tr>
+                <tr><td><label for="invoiceCounter">Invoice Counter:</label></td><td><input type="text" id="invoiceCounter" maxlength="3" value="001" /></td></tr>
+                <tr><td><label for="invoiceNumber">Invoice Number:</label></td><td><input type="text" id="invoiceNumber" readonly /></td></tr>
+            </table>
+        </div>
+        <div class="form-group">
+            <table>
+                <tr><td><label for="clientName">Client Name:</label></td><td><input type="text" id="clientName" /></td></tr>
+                <tr><td><label for="clientCompany">Company:</label></td><td><input type="text" id="clientCompany" /></td></tr>
+                <tr><td><label for="clientEmail">Email:</label></td><td><input type="email" id="clientEmail" /></td></tr>
+                <tr><td><label for="clientPhone">Phone:</label></td><td><input type="tel" id="clientPhone" /></td></tr>
+                <tr><td><label for="clientAddress">Address:</label></td><td><textarea id="clientAddress" rows="2"></textarea></td></tr>
+                <tr><td><label for="invoiceDate">Date:</label></td><td><input type="date" id="invoiceDate" /></td></tr>
+            </table>
+        </div>
+    </div>
+
+    <table id="invoiceTable">
+        <thead>
+            <tr>
+                <th>Description</th>
+                <th style="width: 80px;">Qty</th>
+                <th style="width: 100px;">Unit Price</th>
+                <th>Total</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody id="invoiceBody"></tbody>
+    </table>
+
+    <button class="btn" onclick="addRow()">+ Add Item</button>
+
+    <div class="controls">
+        <button class="btn" onclick="saveDraft()">💾 Save Draft</button>
+        <button class="btn" onclick="loadDraft()">📂 Load Draft</button>
+        <button class="btn" onclick="clearDraft()">🗑️ Clear Draft</button>
+        <button class="btn" onclick="window.print()">🖨️ Print</button>
+        <button class="btn" onclick="exportPDF()">💾 Export as PDF</button>
+    </div>
+
+    <div id="grandTotalDisplay"><strong>Grand Total: $0.00</strong></div>
+
+    <script>
+        let logoBase64 = "";
+
+        document.getElementById("logoInput").addEventListener("change", function (event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                logoBase64 = e.target.result;
+                document.getElementById("logoPreview").src = logoBase64;
+            };
+            reader.readAsDataURL(file);
+        });
+
+        function updateInvoiceNumber() {
+            const suffix = document.getElementById("invoiceSuffix").value.toUpperCase().trim() || "X";
+            const now = new Date();
+            const yyyymmdd = now.toISOString().slice(0, 10).replace(/-/g, '');
+            const counter = document.getElementById("invoiceCounter").value.padStart(3, '0') || "001";
+            const invoice = `INV_${yyyymmdd}${counter}${suffix}`;
+            document.getElementById("invoiceNumber").value = invoice;
+        }
+
+        document.getElementById("invoiceSuffix").addEventListener("input", updateInvoiceNumber);
+        document.getElementById("invoiceCounter").addEventListener("input", updateInvoiceNumber);
+
+        function addRow() {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+                <td>
+                  <input type="text" class="desc" oninput="updateTotals()" placeholder="Description" />
+                  <textarea class="details-textarea" rows="2" placeholder="Details (optional)"></textarea>
+                </td>
+                <td><input type="number" class="qty" value="1" min="1" oninput="updateTotals()" /></td>
+                <td><input type="number" class="price" value="0.00" step="0.01" oninput="updateTotals()" /></td>
+                <td class="total">$0.00</td>
+                <td><button class="btn" onclick="removeRow(this)">🗑️</button></td>
+              `;
+            document.getElementById("invoiceBody").appendChild(row);
+            updateTotals();
+        }
+
+        function removeRow(button) {
+            button.closest("tr").remove();
+            updateTotals();
+        }
+
+        function updateTotals() {
+            const rows = document.querySelectorAll("#invoiceBody tr");
+            let grandTotal = 0;
+            rows.forEach(row => {
+                const qty = parseFloat(row.querySelector(".qty")?.value || 0);
+                const price = parseFloat(row.querySelector(".price")?.value || 0);
+                const total = qty * price;
+                row.querySelector(".total").textContent = `$${total.toFixed(2)}`;
+                grandTotal += total;
+            });
+            document.getElementById("grandTotalDisplay").innerHTML = `<strong>Grand Total: $${grandTotal.toFixed(2)}</strong>`;
+        }
+
+        function saveDraft() {
+            const formData = {
+                companyName: document.getElementById("companyName").value,
+                invoiceSuffix: document.getElementById("invoiceSuffix").value,
+                invoiceCounter: document.getElementById("invoiceCounter").value,
+                invoiceDate: document.getElementById("invoiceDate").value,
+                clientName: document.getElementById("clientName").value,
+                clientCompany: document.getElementById("clientCompany").value,
+                clientEmail: document.getElementById("clientEmail").value,
+                clientPhone: document.getElementById("clientPhone").value,
+                clientAddress: document.getElementById("clientAddress").value,
+                logo: logoBase64,
+                items: []
+            };
+            document.querySelectorAll("#invoiceBody tr").forEach(row => {
+                formData.items.push({
+                    desc: row.querySelector(".desc")?.value || '',
+                    details: row.querySelector(".details-textarea")?.value || '',
+                    qty: row.querySelector(".qty")?.value || '',
+                    price: row.querySelector(".price")?.value || ''
+                });
+            });
+            localStorage.setItem("invoiceDraft", JSON.stringify(formData));
+            alert("Draft saved!");
+        }
+
+        function loadDraft() {
+            const saved = localStorage.getItem("invoiceDraft");
+            if (!saved) return alert("No draft found.");
+            const data = JSON.parse(saved);
+            document.getElementById("companyName").value = data.companyName;
+            document.getElementById("invoiceSuffix").value = data.invoiceSuffix;
+            document.getElementById("invoiceCounter").value = data.invoiceCounter;
+            document.getElementById("invoiceDate").value = data.invoiceDate;
+            document.getElementById("clientName").value = data.clientName;
+            document.getElementById("clientCompany").value = data.clientCompany;
+            document.getElementById("clientEmail").value = data.clientEmail;
+            document.getElementById("clientPhone").value = data.clientPhone;
+            document.getElementById("clientAddress").value = data.clientAddress;
+            logoBase64 = data.logo;
+            document.getElementById("logoPreview").src = logoBase64;
+            updateInvoiceNumber();
+            document.getElementById("invoiceBody").innerHTML = "";
+            data.items.forEach(item => {
+                const row = document.createElement("tr");
+                row.innerHTML = `
+                  <td><input type="text" class="desc" value="${item.desc}" oninput="updateTotals()" />
+                      <textarea class="details-textarea" rows="2">${item.details}</textarea></td>
+                  <td><input type="number" class="qty" value="${item.qty}" min="1" oninput="updateTotals()" /></td>
+                  <td><input type="number" class="price" value="${item.price}" step="0.01" oninput="updateTotals()" /></td>
+                  <td class="total">$0.00</td>
+                  <td><button class="btn" onclick="removeRow(this)">🗑️</button></td>
+                `;
+                document.getElementById("invoiceBody").appendChild(row);
+            });
+            updateTotals();
+            alert("Draft loaded!");
+        }
+
+        function clearDraft() {
+            localStorage.removeItem("invoiceDraft");
+            alert("Saved draft cleared.");
+        }
+
+        async function exportPDF() {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+
+            const companyName = document.getElementById("companyName").value || 'Company';
+            const invoiceNumber = document.getElementById("invoiceNumber").value || 'INV_XXXX';
+            const invoiceDate = document.getElementById("invoiceDate").value || new Date().toLocaleDateString();
+            const clientName = document.getElementById("clientName").value || 'Client';
+            const clientCompany = document.getElementById("clientCompany").value || '';
+            const clientEmail = document.getElementById("clientEmail").value || '';
+            const clientPhone = document.getElementById("clientPhone").value || '';
+            const clientAddress = document.getElementById("clientAddress").value || '';
+
+            let y = 10; // vertical start position
+
+            if (logoBase64) {
+                const img = new Image();
+                img.src = logoBase64;
+                await new Promise(resolve => {
+                    img.onload = () => {
+                        const ratio = img.width / img.height;
+                        const logoHeight = 20;
+                        const logoWidth = logoHeight * ratio;
+                        doc.addImage(logoBase64, 'PNG', 10, y, logoWidth, logoHeight);
+                        doc.setFontSize(14);
+                        doc.text(companyName, 10 + logoWidth + 5, y + 14);
+                        resolve();
+                    };
+                });
+            } else {
+                doc.setFontSize(14);
+                doc.text(companyName, 10, y + 14);
+            }
+
+            const pageWidth = doc.internal.pageSize.getWidth();
+            const rightMargin = 10;
+
+            const suffix = document.getElementById("invoiceSuffix").value.toUpperCase().trim();
+            const labelText = suffix === "Q" ? "Quotation" : "Invoice";
+            const invNumText = `${labelText} #: ${invoiceNumber}`;
+            const dateText = `Date: ${invoiceDate}`;
+
+            const invNumTextWidth = doc.getTextWidth(invNumText);
+            const dateTextWidth = doc.getTextWidth(dateText);
+
+            const maxTextWidth = Math.max(invNumTextWidth, dateTextWidth);
+            const xPos = pageWidth - rightMargin - maxTextWidth;
+
+            // Stack quotation number and date aligned right, ends aligned at pageWidth - rightMargin
+            doc.setFontSize(11);
+            doc.text(invNumText, xPos, y + 6);
+            doc.text(dateText, xPos, y + 12);
+
+            y += 30;
+
+            const spacing = 6;
+            doc.setFontSize(10);
+
+            // Bold client info labels and normal values
+            doc.setFont(undefined, 'bold');
+            doc.text('Client Name:', 10, y);
+            doc.text('Company:', 10, y + spacing);
+            doc.text('Email:', 10, y + spacing * 2);
+            doc.text('Phone:', 10, y + spacing * 3);
+            doc.text('Address:', 10, y + spacing * 4);
+
+            doc.setFont(undefined, 'normal');
+            doc.text(clientName, 40, y);
+            doc.text(clientCompany, 40, y + spacing);
+            doc.text(clientEmail, 40, y + spacing * 2);
+            doc.text(clientPhone, 40, y + spacing * 3);
+
+            const addressLines = doc.splitTextToSize(clientAddress, pageWidth - 40 - rightMargin);
+            doc.text(addressLines, 40, y + spacing * 4);
+
+            y += spacing * (4 + addressLines.length);
+
+            const tableBody = Array.from(document.querySelectorAll("#invoiceBody tr")).map(row => {
+                const desc = row.querySelector(".desc")?.value || '';
+                const details = row.querySelector(".details-textarea")?.value || '';
+                return [
+                    details ? `${desc}\n${details}` : desc,
+                    row.querySelector(".qty")?.value || '0',
+                    `$${parseFloat(row.querySelector(".price")?.value || 0).toFixed(2)}`,
+                    row.querySelector(".total")?.textContent || '$0.00'
+                ];
+            });
+
+            const grandTotalText = document.getElementById("grandTotalDisplay").textContent.replace("Grand Total: ", "") || '$0.00';
+
+            doc.autoTable({
+                startY: y + 10,
+                head: [['Description', 'Qty', 'Unit Price', 'Total']],
+                body: tableBody,
+                theme: 'grid',
+                styles: { fontSize: 10 },
+                headStyles: { fillColor: [58, 74, 90] }
+            });
+
+            const finalY = doc.lastAutoTable.finalY || y + 20;
+            doc.setFontSize(12);
+            doc.setFont(undefined, 'bold');
+            doc.text(`Grand Total: ${grandTotalText}`, pageWidth - doc.getTextWidth(`Grand Total: ${grandTotalText}`) - 10, finalY + 10);
+
+            doc.save(`${invoiceNumber}.pdf`);
+        }
+
+        addRow();
+        updateInvoiceNumber();
+    </script>
+
+</body>
+</html>
