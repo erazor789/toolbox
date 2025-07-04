@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>PDF Editor with Text, Boxes, and Images</title>
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <style>
+        body {
+            background-color: #121212;
+            color: #f0f0f0;
+            font-family: sans-serif;
+        }
+
+        canvas {
+            border: 1px solid #444;
+            background-color: #1e1e1e;
+            cursor: crosshair;
+            display: block;
+            margin-bottom: 10px;
+            position: relative;
+        }
+
+        .element-row {
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #f0f0f0;
+        }
+
+            .element-row input[type="text"],
+            .element-row input[type="number"],
+            .element-row input[type="color"] {
+                background-color: #2a2a2a;
+                color: #f0f0f0;
+                border: 1px solid #555;
+                padding: 4px;
+                border-radius: 4px;
+            }
+
+        button {
+            margin-top: 10px;
+            margin-right: 5px;
+            background-color: #333;
+            color: #f0f0f0;
+            border: 1px solid #555;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+            button:hover {
+                background-color: #444;
+            }
+
+        .delete-btn {
+            background-color: #e74c3c;
+            border: none;
+            color: white;
+            padding: 4px 8px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+            .delete-btn:hover {
+                background-color: #c0392b;
+            }
+
+        #buttonsUnderElements {
+            margin-top: 10px;
+        }
+
+        input[type="file"] {
+            color: #f0f0f0;
+        }
+
+        label {
+            color: #f0f0f0;
+        }
+
+        #filenameInput {
+            background-color: #2a2a2a;
+            color: #f0f0f0;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 4px;
+        }
+    </style>
+
+</head>
+<body>
+
+    <h2>PDF Editor with Text, Boxes, and Images</h2>
+    <input type="file" id="pdfUpload" accept="application/pdf" /><br /><br />
+
+    <canvas id="pdfCanvas"></canvas>
+
+    <div id="elementsContainer"></div>
+
+    <div id="buttonsUnderElements" style="display:none;">
+        <button id="addTextBtn" disabled>Add Text Element</button>
+        <button id="addBoxBtn" disabled>Add Box Element</button>
+        <button id="addImageBtn" disabled>Add Image Element</button>
+        <input type="file" id="imageUpload" accept="image/*" style="display:none;" />
+    </div>
+
+    <!-- Added filename input here -->
+    <label for="filenameInput" style="display:block; margin-top: 15px;">
+        Export Filename:
+        <input type="text" id="filenameInput" value="edited.pdf" style="width: 220px; margin-left: 8px;" />
+    </label>
+
+    <button id="downloadBtn" disabled>Download PDF</button>
+
+    <script>
+        const canvas = document.getElementById("pdfCanvas");
+        const ctx = canvas.getContext("2d");
+        const elementsContainer = document.getElementById("elementsContainer");
+        const buttonsUnderElements = document.getElementById("buttonsUnderElements");
+        const addTextBtn = document.getElementById("addTextBtn");
+        const addBoxBtn = document.getElementById("addBoxBtn");
+        const addImageBtn = document.getElementById("addImageBtn");
+        const imageUpload = document.getElementById("imageUpload");
+        const downloadBtn = document.getElementById("downloadBtn");
+        const filenameInput = document.getElementById("filenameInput");
+
+        let originalPdfBytes = null;
+        let loadedPdfDoc = null;
+        let modifiedPdfBytes = null;
+        let elements = [];
+        let selectedElementId = null;
+
+        const scale = 1.5;
+        const defaultFontSize = 20;
+        let pdfWidth = 0;
+        let pdfHeight = 0;
+
+        let isDrawingBox = false;
+        let boxStartX = 0;
+        let boxStartY = 0;
+
+        function hexToRgb(hex) {
+            hex = hex.replace(/^#/, "");
+            if (hex.length === 3) {
+                hex = hex.split("").map((x) => x + x).join("");
+            }
+            const bigint = parseInt(hex, 16);
+            return {
+                r: (bigint >> 16) & 255,
+                g: (bigint >> 8) & 255,
+                b: bigint & 255,
+            };
+        }
+
+        async function renderPDF(pdfBytes) {
+            const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
+            const pdf = await loadingTask.promise;
+            const page = await pdf.getPage(1);
+            const viewport = page.getViewport({ scale: scale });
+
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            const renderContext = {
+                canvasContext: ctx,
+                viewport: viewport,
+            };
+            await page.render(renderContext).promise;
+        }
+
+        // Fixed renderAllElements function that preloads images before drawing
+        function renderAllElements() {
+            renderPDF(modifiedPdfBytes).then(async () => {
+                // Preload all images and cache them
+                const imagePromises = elements
+                    .filter(el => el.type === 'image' && el.imgDataUrl)
+                    .map(el => new Promise((resolve) => {
+                        if (el._imgObj) {
+                            // Already cached image object
+                            resolve({ el, img: el._imgObj });
+                        } else {
+                            const img = new Image();
+                            img.onload = () => {
+                                el._imgObj = img; // cache the image object for future use
+                                resolve({ el, img });
+                            };
+                            img.onerror = () => {
+                                resolve({ el, img: null });
+                            };
+                            img.src = el.imgDataUrl;
+                        }
+                    }));
+
+                const loadedImages = await Promise.all(imagePromises);
+
+                for (const el of elements) {
+                    if (el.type === 'text' && el.x !== null && el.y !== null) {
+                        ctx.font = `${el.fontSize * scale}px Arial`;
+                        ctx.fillStyle = el.color;
+                        ctx.fillText(el.content, el.x, el.y);
+                    } else if (el.type === 'box' && el.startX !== null && el.startY !== null) {
+                        ctx.lineWidth = 2;
+                        const rgb = hexToRgb(el.fillColor || '#ff0000');
+                        ctx.fillStyle = `rgba(${rgb.r},${rgb.g},${rgb.b},${el.opacity || 0.2})`;
+                        ctx.fillRect(el.startX, el.startY, el.width, el.height);
+
+                        if (!el.noBorder) {
+                            ctx.strokeStyle = el.outlineColor || 'red';
+                            ctx.strokeRect(el.startX, el.startY, el.width, el.height);
+                        }
+                    } else if (el.type === 'image' && el.x !== null && el.y !== null) {
+                        // Find cached loaded image for this element
+                        const found = loadedImages.find(item => item.el.id === el.id);
+                        if (found && found.img) {
+                            ctx.drawImage(found.img, el.x, el.y, found.img.width * el.scale, found.img.height * el.scale);
+                        }
+                    }
+                }
+            });
+        }
+
+        function createTextElementRow(el) {
+            const div = document.createElement("div");
+            div.className = "element-row";
+            div.id = `element-row-${el.id}`;
+            div.innerHTML = `
+                                <input type="text" id="input-${el.id}" value="${el.content}" />
+                                <label>Size:
+                                    <input type="number" id="size-${el.id}" min="6" max="72" step="1" value="${el.fontSize}" />
+                                </label>
+                                <label>Color:
+                                    <input type="color" id="color-${el.id}" value="${el.color}" />
+                                </label>
+                                <button class="delete-btn" id="delete-${el.id}">Delete</button>
+                            `;
+            elementsContainer.appendChild(div);
+
+            const input = document.getElementById(`input-${el.id}`);
+            input.addEventListener("input", () => {
+                el.content = input.value;
+                renderAllElements();
+            });
+            input.addEventListener("focus", () => {
+                selectedElementId = el.id;
+            });
+
+            const sizeInput = document.getElementById(`size-${el.id}`);
+            sizeInput.addEventListener("input", () => {
+                const val = parseInt(sizeInput.value, 10);
+                if (val >= 6 && val <= 72) {
+                    el.fontSize = val;
+                    renderAllElements();
+                }
+            });
+            sizeInput.addEventListener("focus", () => {
+                selectedElementId = el.id;
+            });
+
+            const colorInput = document.getElementById(`color-${el.id}`);
+            colorInput.addEventListener("input", () => {
+                el.color = colorInput.value;
+                renderAllElements();
+            });
+            colorInput.addEventListener("focus", () => {
+                selectedElementId = el.id;
+            });
+
+            const deleteBtn = document.getElementById(`delete-${el.id}`);
+            deleteBtn.addEventListener("click", () => {
+                elements = elements.filter((e) => e.id !== el.id);
+                const rowDiv = document.getElementById(`element-row-${el.id}`);
+                if (rowDiv) rowDiv.remove();
+                if (selectedElementId === el.id) selectedElementId = null;
+                renderAllElements();
+            });
+        }
+
+        function createBoxElementRow(el, index) {
+            const div = document.createElement("div");
+            div.className = "element-row";
+            div.id = `element-row-${el.id}`;
+            div.innerHTML = `
+                                <span>Box #${index + 1}</span>
+                                <label>Fill: <input type="color" value="${el.fillColor}" /></label>
+                                <label>Border: <input type="color" value="${el.outlineColor}" /></label>
+                                <label>Opacity: <input type="number" min="0" max="1" step="0.05" value="${el.opacity}" /></label>
+                                <label>No Border: <input type="checkbox" ${el.noBorder ? 'checked' : ''} /></label>
+                                <button class="delete-btn">Delete</button>
+                            `;
+            const [fillInput, borderInput, opacityInput, noBorderInput, deleteBtn] = div.querySelectorAll("input, .delete-btn");
+
+            fillInput.addEventListener("input", () => {
+                el.fillColor = fillInput.value;
+                renderAllElements();
+            });
+
+            borderInput.addEventListener("input", () => {
+                el.outlineColor = borderInput.value;
+                renderAllElements();
+            });
+
+            opacityInput.addEventListener("input", () => {
+                el.opacity = parseFloat(opacityInput.value);
+                renderAllElements();
+            });
+
+            noBorderInput.addEventListener("change", () => {
+                el.noBorder = noBorderInput.checked;
+                renderAllElements();
+            });
+
+            deleteBtn.addEventListener("click", () => {
+                elements = elements.filter(e => e.id !== el.id);
+                div.remove();
+                renderAllElements();
+            });
+
+            elementsContainer.appendChild(div);
+        }
+
+        function createImageElementRow(el) {
+            const div = document.createElement("div");
+            div.className = "element-row";
+            div.id = `element-row-${el.id}`;
+            div.innerHTML = `
+                                <span>Image</span>
+                                <label>Scale:
+                                    <input type="number" min="0.1" max="10" step="0.1" value="${el.scale}" />
+                                </label>
+                                <button class="delete-btn">Delete</button>
+                            `;
+            const [scaleInput, deleteBtn] = div.querySelectorAll("input, .delete-btn");
+
+            scaleInput.addEventListener("input", () => {
+                const val = parseFloat(scaleInput.value);
+                if (val >= 0.1 && val <= 10) {
+                    el.scale = val;
+                    renderAllElements();
+                }
+            });
+
+            deleteBtn.addEventListener("click", () => {
+                elements = elements.filter(e => e.id !== el.id);
+                div.remove();
+                renderAllElements();
+            });
+
+            elementsContainer.appendChild(div);
+        }
+
+        function rebuildElementsUI() {
+            elementsContainer.innerHTML = "";
+            elements.forEach((el, i) => {
+                if (el.type === 'text') {
+                    createTextElementRow(el);
+                } else if (el.type === 'box') {
+                    createBoxElementRow(el, i);
+                } else if (el.type === 'image') {
+                    createImageElementRow(el);
+                }
+            });
+
+            // Append the add buttons below all elements
+            elementsContainer.appendChild(buttonsUnderElements);
+            buttonsUnderElements.style.display = 'block';
+        }
+
+        document.getElementById("pdfUpload").addEventListener("change", async function (event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const arrayBuffer = await file.arrayBuffer();
+            originalPdfBytes = arrayBuffer;
+            loadedPdfDoc = await PDFLib.PDFDocument.load(arrayBuffer);
+            modifiedPdfBytes = await loadedPdfDoc.save();
+
+            const firstPage = loadedPdfDoc.getPages()[0];
+            pdfWidth = firstPage.getWidth();
+            pdfHeight = firstPage.getHeight();
+
+            elements = [];
+            elementsContainer.innerHTML = "";
+            selectedElementId = null;
+
+            addTextBtn.disabled = false;
+            addBoxBtn.disabled = false;
+            addImageBtn.disabled = false;
+            downloadBtn.disabled = false;
+
+            rebuildElementsUI();
+            await renderAllElements();
+        });
+
+        addTextBtn.addEventListener("click", () => {
+            const id = Date.now().toString();
+            const el = {
+                id,
+                type: 'text',
+                content: "New Text",
+                x: null,
+                y: null,
+                fontSize: defaultFontSize,
+                color: "#ff0000",
+            };
+            elements.push(el);
+            selectedElementId = id;
+
+            rebuildElementsUI();
+            const input = document.getElementById(`input-${id}`);
+            input.focus();
+
+            renderAllElements();
+        });
+
+        addBoxBtn.addEventListener("click", () => {
+            isDrawingBox = true;
+            selectedElementId = null;
+            canvas.style.cursor = 'crosshair';
+            alert('Click and drag on the canvas to draw a box');
+        });
+
+        addImageBtn.addEventListener("click", () => {
+            imageUpload.click();
+        });
+
+        imageUpload.addEventListener("change", (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const imgDataUrl = e.target.result;
+                const id = Date.now().toString();
+                const el = {
+                    id,
+                    type: 'image',
+                    imgDataUrl,
+                    x: null,
+                    y: null,
+                    scale: 1,
+                };
+                elements.push(el);
+                selectedElementId = id;
+
+                rebuildElementsUI();
+                renderAllElements();
+            };
+            reader.readAsDataURL(file);
+            // Clear value so same file can be uploaded again if needed
+            imageUpload.value = '';
+        });
+
+        canvas.addEventListener("mousedown", (e) => {
+            if (!isDrawingBox) return;
+
+            const rect = canvas.getBoundingClientRect();
+            boxStartX = e.clientX - rect.left;
+            boxStartY = e.clientY - rect.top;
+            isDrawingBox = 'drawing';
+        });
+
+        canvas.addEventListener("mousemove", (e) => {
+            if (isDrawingBox !== 'drawing') return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            renderPDF(modifiedPdfBytes).then(() => {
+                renderAllElements();
+
+                const width = mouseX - boxStartX;
+                const height = mouseY - boxStartY;
+                ctx.strokeStyle = 'blue';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6]);
+                ctx.strokeRect(boxStartX, boxStartY, width, height);
+                ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(0,0,255,0.1)';
+                ctx.fillRect(boxStartX, boxStartY, width, height);
+            });
+        });
+
+        canvas.addEventListener("mouseup", (e) => {
+            if (isDrawingBox !== 'drawing') return;
+
+            const rect = canvas.getBoundingClientRect();
+            const boxEndX = e.clientX - rect.left;
+            const boxEndY = e.clientY - rect.top;
+
+            const startX = Math.min(boxStartX, boxEndX);
+            const startY = Math.min(boxStartY, boxEndY);
+            const width = Math.abs(boxEndX - boxStartX);
+            const height = Math.abs(boxEndY - boxStartY);
+
+            if (width < 5 || height < 5) {
+                isDrawingBox = false;
+                renderAllElements();
+                return;
+            }
+
+            const id = Date.now().toString();
+            const boxElement = {
+                id,
+                type: 'box',
+                startX,
+                startY,
+                width,
+                height,
+                fillColor: '#ff0000',
+                outlineColor: '#ff0000',
+                opacity: 0.2,
+                noBorder: false,
+            };
+            elements.push(boxElement);
+            selectedElementId = id;
+
+            isDrawingBox = false;
+            canvas.style.cursor = 'crosshair';
+
+            rebuildElementsUI();
+            renderAllElements();
+        });
+
+        canvas.addEventListener("click", (e) => {
+            if (isDrawingBox) return;
+            if (!selectedElementId) return;
+
+            const element = elements.find(el => el.id === selectedElementId);
+            if (!element) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // For text or image, move position on click
+            if (element.type === 'text' || element.type === 'image') {
+                element.x = x;
+                element.y = y;
+
+                renderAllElements();
+            }
+        });
+
+        downloadBtn.addEventListener("click", async () => {
+            if (!loadedPdfDoc) return;
+
+            const pages = loadedPdfDoc.getPages();
+            const firstPage = pages[0];
+
+            for (const el of elements) {
+                if (el.type === 'text' && el.x !== null && el.y !== null) {
+                    const pdfX = el.x / scale;
+                    const pdfY = pdfHeight - el.y / scale;
+
+                    const c = hexToRgb(el.color);
+
+                    firstPage.drawText(el.content, {
+                        x: pdfX,
+                        y: pdfY,
+                        size: el.fontSize,
+                        color: PDFLib.rgb(c.r / 255, c.g / 255, c.b / 255),
+                    });
+                } else if (el.type === 'box') {
+                    const pdfX = el.startX / scale;
+                    const pdfY = pdfHeight - (el.startY / scale) - (el.height / scale);
+                    const pdfWidthBox = el.width / scale;
+                    const pdfHeightBox = el.height / scale;
+
+                    const c = hexToRgb(el.fillColor);
+
+                    firstPage.drawRectangle({
+                        x: pdfX,
+                        y: pdfY,
+                        width: pdfWidthBox,
+                        height: pdfHeightBox,
+                        color: PDFLib.rgb(c.r / 255, c.g / 255, c.b / 255),
+                        opacity: el.opacity,
+                        borderColor: el.noBorder ? undefined : PDFLib.rgb(c.r / 255, c.g / 255, c.b / 255),
+                        borderWidth: el.noBorder ? 0 : 1,
+                    });
+                } else if (el.type === 'image' && el.imgDataUrl && el.x !== null && el.y !== null) {
+                    try {
+                        const imgBytes = await fetch(el.imgDataUrl).then(r => r.arrayBuffer());
+                        const ext = el.imgDataUrl.substring("data:image/".length, el.imgDataUrl.indexOf(";base64"));
+                        let pdfImage;
+                        if (ext === "png") {
+                            pdfImage = await loadedPdfDoc.embedPng(imgBytes);
+                        } else {
+                            pdfImage = await loadedPdfDoc.embedJpg(imgBytes);
+                        }
+                        const pdfX = el.x / scale;
+                        const pdfY = pdfHeight - (el.y / scale) - (pdfImage.height * el.scale) / scale;
+                        const imgWidth = (pdfImage.width * el.scale) / scale;
+                        const imgHeight = (pdfImage.height * el.scale) / scale;
+
+                        firstPage.drawImage(pdfImage, {
+                            x: pdfX,
+                            y: pdfY,
+                            width: imgWidth,
+                            height: imgHeight,
+                        });
+                    } catch (e) {
+                        console.error('Error embedding image:', e);
+                    }
+                }
+            }
+
+            const pdfBytes = await loadedPdfDoc.save();
+            const blob = new Blob([pdfBytes], { type: "application/pdf" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filenameInput.value.trim() || "edited.pdf";
+            a.click();
+            URL.revokeObjectURL(url);
+        });
+
+    </script>
+</body>
+</html>

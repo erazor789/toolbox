@@ -1,0 +1,180 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>PDF Merger with Preview & Reorder</title>
+    <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background-color: #121212;
+        color: #f0f0f0;
+    }
+
+    #fileList {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 1em;
+    }
+
+    .file-card {
+        width: 160px;
+        border: 1px solid #444;
+        border-radius: 6px;
+        overflow: hidden;
+        background: #1e1e1e;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 8px;
+        color: #f0f0f0;
+    }
+
+    canvas {
+        width: 100%;
+        height: auto;
+        margin-bottom: 4px;
+        background: #2a2a2a;
+    }
+
+    .controls {
+        display: flex;
+        gap: 4px;
+        margin-top: 4px;
+    }
+
+    button {
+        padding: 4px 8px;
+        background-color: #333;
+        color: #f0f0f0;
+        border: 1px solid #555;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    button:hover {
+        background-color: #444;
+    }
+
+    input[type="file"] {
+        background-color: #1e1e1e;
+        color: #f0f0f0;
+        border: 1px solid #555;
+        padding: 4px;
+        border-radius: 4px;
+    }
+
+    a#downloadLink {
+        color: #90caf9;
+        text-decoration: underline;
+    }
+</style>
+
+</head>
+<body>
+    <h1>Merge PDFs with Preview & Reorder</h1>
+    <input type="file" id="pdfFiles" multiple accept="application/pdf" />
+    <div id="fileList"></div>
+    <button id="mergeBtn" disabled>Merge PDFs</button>
+    <br><br>
+    <a id="downloadLink" style="display:none;" download="merged.pdf">Download Merged PDF</a>
+
+    <script>
+        const { PDFDocument } = PDFLib;
+        const fileInput = document.getElementById('pdfFiles');
+        const fileList = document.getElementById('fileList');
+        const mergeBtn = document.getElementById('mergeBtn');
+        const downloadLink = document.getElementById('downloadLink');
+        let filesArray = [];
+
+        fileInput.addEventListener('change', () => {
+            filesArray = Array.from(fileInput.files);
+            renderFileCards();
+            mergeBtn.disabled = filesArray.length === 0;
+            downloadLink.style.display = 'none';
+        });
+
+        function renderFileCards() {
+            fileList.innerHTML = '';
+            filesArray.forEach((file, index) => {
+                const card = document.createElement('div');
+                card.className = 'file-card';
+
+                const canvas = document.createElement('canvas');
+                card.appendChild(canvas);
+
+                const label = document.createElement('div');
+                label.textContent = file.name.length > 20 ? file.name.slice(0, 17) + '...' : file.name;
+                label.style.textAlign = 'center';
+                label.style.fontSize = '12px';
+                label.style.margin = '4px 0';
+                card.appendChild(label);
+
+                const controls = document.createElement('div');
+                controls.className = 'controls';
+
+                const upBtn = document.createElement('button');
+                upBtn.textContent = '↑';
+                upBtn.disabled = index === 0;
+                upBtn.onclick = () => {
+                    [filesArray[index - 1], filesArray[index]] = [filesArray[index], filesArray[index - 1]];
+                    renderFileCards();
+                };
+
+                const downBtn = document.createElement('button');
+                downBtn.textContent = '↓';
+                downBtn.disabled = index === filesArray.length - 1;
+                downBtn.onclick = () => {
+                    [filesArray[index], filesArray[index + 1]] = [filesArray[index + 1], filesArray[index]];
+                    renderFileCards();
+                };
+
+                controls.appendChild(upBtn);
+                controls.appendChild(downBtn);
+                card.appendChild(controls);
+                fileList.appendChild(card);
+
+                // Render PDF first page preview
+                const reader = new FileReader();
+                reader.onload = async () => {
+                    const pdf = await pdfjsLib.getDocument({ data: reader.result }).promise;
+                    const page = await pdf.getPage(1);
+                    const context = canvas.getContext('2d');
+                    const viewport = page.getViewport({ scale: 0.5 });
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    await page.render({ canvasContext: context, viewport }).promise;
+                };
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        mergeBtn.addEventListener('click', async () => {
+            mergeBtn.disabled = true;
+            mergeBtn.textContent = 'Merging...';
+
+            const mergedPdf = await PDFDocument.create();
+            for (const file of filesArray) {
+                const arrayBuffer = await file.arrayBuffer();
+                const pdf = await PDFDocument.load(arrayBuffer);
+                const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+                copiedPages.forEach(page => mergedPdf.addPage(page));
+            }
+
+            const mergedBytes = await mergedPdf.save();
+            const blob = new Blob([mergedBytes], { type: 'application/pdf' });
+            const url = URL.createObjectURL(blob);
+
+            downloadLink.href = url;
+            downloadLink.style.display = 'inline';
+            downloadLink.textContent = 'Download Merged PDF';
+
+            mergeBtn.disabled = false;
+            mergeBtn.textContent = 'Merge PDFs';
+        });
+    </script>
+</body>
+</html>
