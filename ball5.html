@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Platformer with Shrinking Platforms</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      touch-action: none;
+    }
+    canvas {
+      border: 2px solid #fff;
+      background: #222;
+      display: block;
+      touch-action: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="400" height="600"></canvas>
+
+  <audio id="bounceSound" preload="auto">
+    <source src="data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAESsAAAB3AQACABAAZGF0YQAAAAAAgD8AAIA/AACAPwAAQDwAAP8AAACAAACAAIAAgD8AAP8AAABAAIAA" type="audio/wav">
+  </audio>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const bounceSound = document.getElementById("bounceSound");
+
+    const radius = 15;
+    const gravity = 0.5;
+    const moveSpeed = 6;
+    const jumpForce = 10;
+
+    const platformHeight = 10;
+    const platformWidthMinDefault = 80; // starting min width
+    const platformWidthMaxDefault = 150; // starting max width
+    const minPlatformWidthAbsolute = 2 * radius; // half ball diameter = radius*2/2 = radius
+    const maxJumpHeight = (jumpForce * jumpForce) / (2 * gravity);
+    const platformSpacing = maxJumpHeight * 0.8;
+    const maxPlatformsOnScreen = 15;
+    const bufferAbove = 200;
+    const bufferBelow = 200;
+
+    let x, y, dx, dy, cameraY, platformsPassed;
+    let keys = {};
+    let movingLeft = false;
+    let movingRight = false;
+    let onGround = false;
+    let platforms = [];
+    let gameOver = false;
+
+    function clamp(val, min, max) {
+      return Math.min(Math.max(val, min), max);
+    }
+
+    function getFixedXPositions(platformWidth) {
+      return [
+        0,
+        canvas.width * 0.25 - platformWidth / 2,
+        canvas.width * 0.5 - platformWidth / 2,
+        canvas.width * 0.75 - platformWidth / 2,
+        canvas.width - platformWidth,
+      ];
+    }
+
+    // Calculate current platform width range based on score:
+    // Shrink min and max widths linearly with score,
+    // down to minimum width = minPlatformWidthAbsolute
+    function getCurrentPlatformWidths() {
+      // How fast platform shrinks per score
+      const shrinkRate = 2; // pixels per platform passed (tweak this)
+      let newMin = platformWidthMinDefault - shrinkRate * platformsPassed;
+      let newMax = platformWidthMaxDefault - shrinkRate * platformsPassed;
+
+      newMin = Math.max(newMin, minPlatformWidthAbsolute);
+      newMax = Math.max(newMax, newMin);
+
+      return { newMin, newMax };
+    }
+
+    function generatePlatform() {
+      const lastPlatform = platforms[platforms.length - 1];
+      const lastLane = lastPlatform.laneIndex;
+      const newY = lastPlatform.y - platformSpacing;
+
+      // Get current width limits
+      const { newMin, newMax } = getCurrentPlatformWidths();
+
+      const newWidth = Math.random() * (newMax - newMin) + newMin;
+      const fixedXPositions = getFixedXPositions(newWidth);
+
+      const allowedLanes = [];
+      for (let offset = -1; offset <= 1; offset++) {
+        const lane = clamp(lastLane + offset, 0, 4);
+        if (!allowedLanes.includes(lane)) allowedLanes.push(lane);
+      }
+
+      const newLane = allowedLanes[Math.floor(Math.random() * allowedLanes.length)];
+      const newX = fixedXPositions[newLane];
+
+      platforms.push({
+        x: newX,
+        y: newY,
+        width: newWidth,
+        height: platformHeight,
+        laneIndex: newLane,
+        passed: false,
+        hitCount: 0,
+      });
+    }
+
+    function initGame() {
+      x = canvas.width / 2;
+      y = canvas.height - radius - 10;
+      dx = 0;
+      dy = 0;
+      cameraY = 0;
+      platformsPassed = 0;
+      gameOver = false;
+      platforms = [{
+        x: 0,
+        y: canvas.height - 10,
+        width: canvas.width,
+        height: platformHeight,
+        laneIndex: 0,
+        passed: false,
+        hitCount: 0,
+      }];
+      while (platforms[platforms.length - 1].y > -600) {
+        generatePlatform();
+      }
+    }
+
+    function checkPlatformCollision() {
+      onGround = false;
+      for (let i = 0; i < platforms.length; i++) {
+        const p = platforms[i];
+        const withinX = x + radius > p.x && x - radius < p.x + p.width;
+        const falling = dy >= 0;
+        const withinY = y + radius >= p.y && y + radius <= p.y + dy + 10;
+
+        if (withinX && falling && withinY) {
+          y = p.y - radius;
+          dy = 0;
+          onGround = true;
+
+          p.hitCount++;
+          if (p.hitCount >= 2) {
+            platforms.splice(i, 1);
+            i--;
+          }
+
+          bounceSound.currentTime = 0;
+          bounceSound.play();
+          break;
+        }
+      }
+    }
+
+    function updateMovementFromKeys() {
+      if (keys["a"] || keys["arrowleft"]) {
+        movingLeft = true;
+        movingRight = false;
+      } else if (keys["d"] || keys["arrowright"]) {
+        movingRight = true;
+        movingLeft = false;
+      } else {
+        movingLeft = false;
+        movingRight = false;
+      }
+    }
+
+    window.addEventListener("keydown", (e) => {
+      keys[e.key.toLowerCase()] = true;
+      updateMovementFromKeys();
+      if (gameOver) initGame();
+    });
+
+    window.addEventListener("keyup", (e) => {
+      keys[e.key.toLowerCase()] = false;
+      updateMovementFromKeys();
+    });
+
+    canvas.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      for (const touch of e.touches) {
+        if (touch.clientX < window.innerWidth / 2) {
+          movingLeft = true;
+        } else {
+          movingRight = true;
+        }
+      }
+      if (gameOver) initGame();
+    }, { passive: false });
+
+    canvas.addEventListener("touchend", () => {
+      movingLeft = false;
+      movingRight = false;
+    }, { passive: false });
+
+    canvas.addEventListener("mousedown", (e) => {
+      if (e.clientX < canvas.getBoundingClientRect().left + canvas.width / 2) {
+        movingLeft = true;
+        movingRight = false;
+      } else {
+        movingRight = true;
+        movingLeft = false;
+      }
+    });
+
+    canvas.addEventListener("mouseup", () => {
+      movingLeft = false;
+      movingRight = false;
+    });
+
+    canvas.addEventListener("click", () => {
+      if (gameOver) initGame();
+    });
+
+    function loop() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      if (!gameOver) {
+        dy += gravity;
+
+        if (movingLeft) {
+          dx = -moveSpeed;
+        } else if (movingRight) {
+          dx = moveSpeed;
+        } else {
+          dx = 0;
+        }
+
+        if (onGround) {
+          dy = -jumpForce;
+          onGround = false;
+        }
+
+        x += dx;
+        y += dy;
+
+        if (x - radius < 0) x = radius;
+        if (x + radius > canvas.width) x = canvas.width - radius;
+
+        checkPlatformCollision();
+
+        if (y - cameraY < canvas.height / 3) {
+          cameraY = y - canvas.height / 3;
+        }
+
+        platforms = platforms.filter(
+          (p) => p.y > cameraY - bufferAbove && p.y < cameraY + canvas.height + bufferBelow
+        );
+
+        while (platforms.length < maxPlatformsOnScreen) {
+          generatePlatform();
+        }
+
+        for (const p of platforms) {
+          if (!p.passed && y < p.y) {
+            p.passed = true;
+            platformsPassed++;
+          }
+        }
+
+        if (y - cameraY > canvas.height + 100) {
+          gameOver = true;
+        }
+      }
+
+      // Draw platforms
+      ctx.fillStyle = "#444";
+      for (const p of platforms) {
+        ctx.fillRect(p.x, p.y - cameraY, p.width, p.height);
+      }
+
+      // Draw player
+      ctx.beginPath();
+      ctx.arc(x, y - cameraY, radius, 0, Math.PI * 2);
+      ctx.fillStyle = "#00ffcc";
+      ctx.fill();
+      ctx.closePath();
+
+      // Draw score
+      ctx.fillStyle = "#0f0";
+      ctx.font = "20px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(`Score: ${platformsPassed}`, canvas.width / 2, 30);
+
+      if (gameOver) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.fillStyle = "#fff";
+        ctx.font = "32px Arial";
+        ctx.fillText("Game Over", canvas.width / 2, canvas.height / 2 - 20);
+        ctx.font = "20px Arial";
+        ctx.fillText(`Final Score: ${platformsPassed}`, canvas.width / 2, canvas.height / 2 + 10);
+        ctx.fillText("Tap or press any key to restart", canvas.width / 2, canvas.height / 2 + 40);
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    initGame();
+    loop();
+  </script>
+</body>
+</html>
