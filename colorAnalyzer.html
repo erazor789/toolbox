@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Color Palette Extractor</title>
+
+  <!-- SortableJS for drag-and-drop support -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #111;
+      color: #eee;
+      padding: 20px;
+      text-align: center;
+    }
+
+    h2 {
+      color: #fff;
+    }
+
+    #dropzone {
+      border: 2px dashed #555;
+      padding: 40px;
+      border-radius: 10px;
+      background: #1c1c1c;
+      margin-bottom: 20px;
+      cursor: pointer;
+      transition: 0.3s;
+      user-select: none;
+    }
+
+    #dropzone.hover {
+      background: #222;
+      border-color: #888;
+    }
+
+    #pasteInfo {
+      margin-top: 10px;
+      font-size: 0.9em;
+      color: #aaa;
+    }
+
+    /* Responsive larger preview image */
+    #sourceImage {
+      display: block;
+      max-width: 90vw;
+      max-height: 60vh;
+      margin: 20px auto;
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+      border-radius: 10px;
+      cursor: crosshair;
+      object-fit: contain;
+    }
+
+    #palette, #pickedPalette {
+      display: flex;
+      justify-content: center;
+      flex-wrap: nowrap;
+      gap: 10px;
+      margin-top: 20px;
+      min-height: 70px;
+      overflow-x: auto;
+      padding-bottom: 10px;
+    }
+
+    .color-box {
+      width: 70px;
+      height: 70px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      position: relative;
+      cursor: pointer;
+      transition: transform 0.1s ease;
+      touch-action: manipulation;
+      flex-shrink: 0;
+    }
+
+    .color-box:hover,
+    .color-box:focus {
+      transform: scale(1.1);
+      outline: none;
+    }
+
+    .color-box:hover::after {
+      content: attr(data-color);
+      position: absolute;
+      bottom: -30px;
+      background: #222;
+      color: #fff;
+      padding: 4px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      white-space: nowrap;
+      z-index: 10;
+    }
+
+    canvas {
+      display: none;
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    h3 {
+      margin-top: 30px;
+      font-weight: normal;
+      color: #aaa;
+    }
+
+    .export-controls {
+      margin-top: 10px;
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
+      color: #ccc;
+    }
+
+    .export-controls label {
+      user-select: none;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .export-controls button {
+      background: #222;
+      border: 1px solid #555;
+      border-radius: 6px;
+      color: #eee;
+      padding: 6px 14px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s, border-color 0.2s;
+    }
+
+    .export-controls button:hover {
+      background: #333;
+      border-color: #888;
+    }
+
+    /* Mobile Responsive Adjustments */
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+        font-size: 16px;
+      }
+
+      h2 {
+        font-size: 1.4rem;
+      }
+
+      h3 {
+        font-size: 1.2rem;
+      }
+
+      #dropzone {
+        padding: 30px 20px;
+        font-size: 1rem;
+      }
+
+      .export-controls {
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      .export-controls button {
+        width: 100%;
+        padding: 12px 0;
+      }
+
+      #palette,
+      #pickedPalette {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Accent-Aware Color Palette Extractor</h2>
+
+  <div id="dropzone" tabindex="0">📂 Drag & Drop, Click to Upload, or Paste (Ctrl+V)</div>
+  <div id="pasteInfo">(Try copying an image and pressing Ctrl+V)</div>
+  <input type="file" id="fileInput" accept="image/*" />
+
+  <img id="sourceImage" crossorigin="anonymous" alt="Source Preview" />
+  <canvas id="canvas"></canvas>
+
+  <h3>Top 5 Accent Colors</h3>
+  <div id="palette" aria-label="Top 5 Accent Colors"></div>
+
+  <div class="export-controls" id="paletteExports">
+    <label><input type="radio" name="paletteCopyFormat" value="hex" checked> Copy HEX</label>
+    <label><input type="radio" name="paletteCopyFormat" value="rgb"> Copy RGB</label>
+    <button id="copyPaletteBtn" aria-label="Copy top 5 palette colors">Copy Palette</button>
+    <button id="downloadPaletteImgBtn" aria-label="Download top 5 palette as image">Download Palette Image</button>
+  </div>
+
+  <h3>Colors You Picked</h3>
+  <div id="pickedPalette" aria-label="Colors You Picked"></div>
+
+  <div class="export-controls" id="pickedPaletteExports">
+    <label><input type="radio" name="pickedCopyFormat" value="hex" checked> Copy HEX</label>
+    <label><input type="radio" name="pickedCopyFormat" value="rgb"> Copy RGB</label>
+    <button id="copyPickedPaletteBtn" aria-label="Copy picked colors palette">Copy Palette</button>
+    <button id="downloadPickedPaletteImgBtn" aria-label="Download picked palette as image">Download Palette Image</button>
+  </div>
+
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const sourceImage = document.getElementById('sourceImage');
+    const canvas = document.getElementById('canvas');
+    const pickedPalette = document.getElementById('pickedPalette');
+    const palette = document.getElementById('palette');
+
+    dropzone.addEventListener('click', () => fileInput.click());
+
+    dropzone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropzone.classList.add('hover');
+    });
+
+    dropzone.addEventListener('dragleave', () => {
+      dropzone.classList.remove('hover');
+    });
+
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('hover');
+      const file = e.dataTransfer.files[0];
+      if (file) loadImage(file);
+    });
+
+    fileInput.addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (file) loadImage(file);
+    });
+
+    document.addEventListener('paste', e => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let item of items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) loadImage(file);
+          break;
+        }
+      }
+    });
+
+    function loadImage(file) {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        sourceImage.onload = () => {
+          extractColors(sourceImage);
+          setupImageClickSampling(sourceImage);
+        };
+        sourceImage.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function extractColors(img) {
+      const ctx = canvas.getContext('2d');
+      const targetSize = 100;
+      const scale = Math.min(targetSize / img.width, targetSize / img.height, 1);
+      canvas.width = Math.floor(img.width * scale);
+      canvas.height = Math.floor(img.height * scale);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      const colorScores = {};
+      const quant = 16;
+
+      for (let i = 0; i < imageData.length; i += 4) {
+        let r = imageData[i];
+        let g = imageData[i + 1];
+        let b = imageData[i + 2];
+        let alpha = imageData[i + 3];
+        if (alpha < 128) continue;
+
+        const brightness = (r + g + b) / 3;
+        if (brightness < 20) continue;
+
+        const [h, s, l] = rgbToHsl(r, g, b);
+        if (s < 0.1) continue;
+
+        r = Math.floor(r / quant) * quant;
+        g = Math.floor(g / quant) * quant;
+        b = Math.floor(b / quant) * quant;
+
+        const key = `${r},${g},${b}`;
+        const score = s * (1 - Math.abs(l - 0.5));
+        colorScores[key] = (colorScores[key] || 0) + score;
+      }
+
+      const topColors = Object.entries(colorScores)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(e => e[0]);
+
+      palette.innerHTML = '';
+      topColors.forEach(rgbStr => {
+        const [r, g, b] = rgbStr.split(',').map(Number);
+        const hex = rgbToHex(r, g, b);
+        const box = document.createElement('div');
+        box.className = 'color-box';
+        box.style.backgroundColor = `rgb(${rgbStr})`;
+        box.setAttribute('data-color', `RGB(${rgbStr}) / ${hex}`);
+        box.setAttribute('tabindex', '0');
+        box.addEventListener('click', () => box.remove());
+        palette.appendChild(box);
+      });
+    }
+
+    function setupImageClickSampling(img) {
+      const ctx = canvas.getContext('2d');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0);
+
+      img.addEventListener('click', e => {
+        const rect = img.getBoundingClientRect();
+        const scaleX = img.naturalWidth / rect.width;
+        const scaleY = img.naturalHeight / rect.height;
+        const x = Math.floor((e.clientX - rect.left) * scaleX);
+        const y = Math.floor((e.clientY - rect.top) * scaleY);
+
+        const pixel = ctx.getImageData(x, y, 1, 1).data;
+        const [r, g, b] = [pixel[0], pixel[1], pixel[2]];
+        const hex = rgbToHex(r, g, b);
+        const rgbStr = `${r},${g},${b}`;
+        const box = document.createElement('div');
+        box.className = 'color-box';
+        box.style.backgroundColor = `rgb(${rgbStr})`;
+        box.setAttribute('data-color', `RGB(${rgbStr}) / ${hex}`);
+        box.setAttribute('tabindex', '0');
+        box.addEventListener('click', () => box.remove());
+        pickedPalette.appendChild(box);
+
+        if (pickedPalette.children.length > 20) {
+          pickedPalette.removeChild(pickedPalette.firstChild);
+        }
+      });
+    }
+
+    function rgbToHex(r, g, b) {
+      return "#" + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+    }
+
+    function rgbToHsl(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      const max = Math.max(r, g, b), min = Math.min(r, g, b);
+      let h, s, l = (max + min) / 2;
+      if (max === min) {
+        h = s = 0;
+      } else {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+          case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+          case g: h = (b - r) / d + 2; break;
+          case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+      }
+      return [h, s, l];
+    }
+
+    // Enable drag-and-drop reordering
+    new Sortable(palette, {
+      animation: 150
+    });
+
+    new Sortable(pickedPalette, {
+      animation: 150
+    });
+
+    // Copy palette colors to clipboard
+    function copyPaletteColors(container, format) {
+      const colors = [];
+      for (const box of container.children) {
+        const bg = box.style.backgroundColor; // rgb(r, g, b)
+        if (format === 'hex') {
+          // Convert rgb to hex
+          const rgb = bg.match(/\d+/g).map(Number);
+          colors.push(rgbToHex(...rgb));
+        } else if (format === 'rgb') {
+          colors.push(bg);
+        }
+      }
+      if (colors.length === 0) {
+        alert('No colors to copy.');
+        return;
+      }
+
+      const text = colors.join('\n');
+      navigator.clipboard.writeText(text).then(() => {
+        alert('Palette copied to clipboard:\n' + text);
+      }, () => {
+        alert('Failed to copy to clipboard.');
+      });
+    }
+
+    // Timestamp prefix for filenames
+    function getTimestampPrefix() {
+      const now = new Date();
+      const pad = n => n.toString().padStart(2, '0');
+      const year = now.getFullYear();
+      const month = pad(now.getMonth() + 1);
+      const day = pad(now.getDate());
+      const hour = pad(now.getHours());
+      const minute = pad(now.getMinutes());
+      return `${year}${month}${day}_${hour}${minute}_`;
+    }
+
+    // Generate and download palette as image
+    function downloadPaletteImage(container, baseFilename) {
+      if (container.children.length === 0) {
+        alert('No colors to export.');
+        return;
+      }
+      const swatchSize = 70;
+      const gap = 10;
+      const count = container.children.length;
+      const width = count * (swatchSize + gap) - gap;
+      const height = swatchSize;
+
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width = width;
+      exportCanvas.height = height;
+      const ctx = exportCanvas.getContext('2d');
+
+      let x = 0;
+      for (const box of container.children) {
+        const bg = box.style.backgroundColor;
+        ctx.fillStyle = bg;
+        ctx.fillRect(x, 0, swatchSize, swatchSize);
+        x += swatchSize + gap;
+      }
+
+      const filename = getTimestampPrefix() + baseFilename;
+
+      exportCanvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    // Event handlers for Top 5 palette
+    document.getElementById('copyPaletteBtn').addEventListener('click', () => {
+      const format = document.querySelector('input[name="paletteCopyFormat"]:checked').value;
+      copyPaletteColors(palette, format);
+    });
+
+    document.getElementById('downloadPaletteImgBtn').addEventListener('click', () => {
+      downloadPaletteImage(palette, 'top5_palette.png');
+    });
+
+    // Event handlers for Picked palette
+    document.getElementById('copyPickedPaletteBtn').addEventListener('click', () => {
+      const format = document.querySelector('input[name="pickedCopyFormat"]:checked').value;
+      copyPaletteColors(pickedPalette, format);
+    });
+
+    document.getElementById('downloadPickedPaletteImgBtn').addEventListener('click', () => {
+      downloadPaletteImage(pickedPalette, 'picked_palette.png');
+    });
+  </script>
+
+</body>
+</html>
