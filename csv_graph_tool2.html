@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Dual CSV Plotter with Comparison Overlay</title>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body {
+    background: #121212;
+    color: #fff;
+    font-family: sans-serif;
+    margin: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  h1 {
+    text-align: center;
+    margin-bottom: 30px;
+  }
+  .plot-container {
+    width: 90vw;
+    max-width: 1200px;
+    background: #1e1e1e;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 40px;
+  }
+  .controls {
+    width: 320px;
+    max-width: 100%;
+    margin-bottom: 20px;
+  }
+  input[type="file"], select {
+    width: 100%;
+    padding: 8px;
+    background: #121212;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #eee;
+    margin-bottom: 10px;
+  }
+  label.inline {
+    cursor: pointer;
+    user-select: none;
+  }
+  #stats1, #stats2 {
+    background: #121212;
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+    color: #ddd;
+  }
+  .charts {
+    display: flex;
+    flex-direction: column;
+    gap: 30px;
+  }
+  .chart-wrapper {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+  }
+  canvas {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+  }
+  .checkboxes {
+    background: #121212;
+    border-radius: 6px;
+    padding: 12px 20px;
+    font-size: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    max-width: 600px;
+    justify-content: center;
+    color: #ddd;
+  }
+  .checkboxes label {
+    flex: 1 1 45%;
+    white-space: nowrap;
+  }
+  @media (max-width: 640px) {
+    .chart-wrapper {
+      width: 100%;
+    }
+    .checkboxes label {
+      flex: 1 1 100%;
+    }
+  }
+</style>
+</head>
+<body>
+
+<h1>Dual CSV Plotter with Comparison Overlay</h1>
+
+<div class="plot-container" id="plot1">
+  <h2>Dataset 1</h2>
+  <div class="controls">
+    <input type="file" id="csvFile1" accept=".csv,.tsv,.txt" />
+    <label for="xSelect1">X-axis:</label>
+    <select id="xSelect1" disabled></select>
+    <label for="ySelect1">Y-axis:</label>
+    <select id="ySelect1" disabled></select>
+    <div id="stats1"></div>
+  </div>
+  <div class="charts">
+    <div class="chart-wrapper">
+      <canvas id="scatterChart1"></canvas>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="normalChart1"></canvas>
+    </div>
+    <div class="checkboxes" id="normalOptions1">
+      <label class="inline"><input type="checkbox" id="toggleRawPoints1" checked> Raw data points</label>
+      <label class="inline"><input type="checkbox" id="toggleNormalCurve1" checked> Normal distribution curve</label>
+      <label class="inline"><input type="checkbox" id="toggleMeanLine1" checked> Mean line</label>
+      <label class="inline"><input type="checkbox" id="toggleMedianLine1" checked> Median line</label>
+      <label class="inline"><input type="checkbox" id="toggleStdBands1" checked> Std dev bands (±1,2,3)</label>
+      <label class="inline"><input type="checkbox" id="toggleHistogram1"> Show Histogram</label>
+    </div>
+  </div>
+</div>
+
+<div class="plot-container" id="plot2">
+  <h2>Dataset 2</h2>
+  <div class="controls">
+    <input type="file" id="csvFile2" accept=".csv,.tsv,.txt" />
+    <label for="xSelect2">X-axis:</label>
+    <select id="xSelect2" disabled></select>
+    <label for="ySelect2">Y-axis:</label>
+    <select id="ySelect2" disabled></select>
+    <div id="stats2"></div>
+  </div>
+  <div class="charts">
+    <div class="chart-wrapper">
+      <canvas id="scatterChart2"></canvas>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="normalChart2"></canvas>
+    </div>
+    <div class="checkboxes" id="normalOptions2">
+      <label class="inline"><input type="checkbox" id="toggleRawPoints2" checked> Raw data points</label>
+      <label class="inline"><input type="checkbox" id="toggleNormalCurve2" checked> Normal distribution curve</label>
+      <label class="inline"><input type="checkbox" id="toggleMeanLine2" checked> Mean line</label>
+      <label class="inline"><input type="checkbox" id="toggleMedianLine2" checked> Median line</label>
+      <label class="inline"><input type="checkbox" id="toggleStdBands2" checked> Std dev bands (±1,2,3)</label>
+      <label class="inline"><input type="checkbox" id="toggleHistogram2"> Show Histogram</label>
+    </div>
+  </div>
+</div>
+
+<!-- New Comparison Section -->
+<div class="plot-container" id="plotComparison">
+  <h2>Comparison: Overlay of Dataset 1 & 2</h2>
+  <div class="checkboxes" id="comparisonOptions">
+    <label class="inline"><input type="checkbox" id="showRaw1" checked> Show Dataset 1 Raw Points</label>
+    <label class="inline"><input type="checkbox" id="showNormal1" checked> Show Dataset 1 Normal Curve</label>
+    <label class="inline"><input type="checkbox" id="showRaw2" checked> Show Dataset 2 Raw Points</label>
+    <label class="inline"><input type="checkbox" id="showNormal2" checked> Show Dataset 2 Normal Curve</label>
+  </div>
+  <div class="chart-wrapper" style="max-width: 100%;">
+    <canvas id="comparisonChart"></canvas>
+  </div>
+  
+  <!-- Manual Scale Controls -->
+  <div style="margin-top: 10px; max-width: 400px; color: #ddd;">
+    <label>
+      X Min: <input type="number" step="any" id="manualXMin" style="width: 80px; background: #121212; color: #eee; border: 1px solid #555; border-radius: 4px;"/>
+    </label>
+    <label style="margin-left: 15px;">
+      X Max: <input type="number" step="any" id="manualXMax" style="width: 80px; background: #121212; color: #eee; border: 1px solid #555; border-radius: 4px;"/>
+    </label>
+    <label style="margin-left: 15px;">
+      Y Max: <input type="number" step="any" id="manualYMax" style="width: 80px; background: #121212; color: #eee; border: 1px solid #555; border-radius: 4px;"/>
+    </label>
+    <button id="applyScaleBtn" style="margin-left: 15px; padding: 4px 10px; background: #2196f3; border: none; border-radius: 4px; color: #fff; cursor: pointer;">Apply</button>
+    <button id="resetScaleBtn" style="margin-left: 5px; padding: 4px 10px; background: #555; border: none; border-radius: 4px; color: #fff; cursor: pointer;">Reset</button>
+  </div>
+
+  <div id="comparisonStats" style="margin-top: 15px; font-size: 0.9rem; color: #ddd;"></div>
+</div>
+
+<script>
+  // Helper functions same as before
+  function computeStats(arr) {
+    const count = arr.length;
+    const mean = arr.reduce((a,b) => a + b, 0) / count;
+    const sorted = [...arr].sort((a,b) => a-b);
+    const median = sorted[Math.floor(count/2)];
+    const min = sorted[0];
+    const max = sorted[sorted.length -1];
+    const stddev = Math.sqrt(arr.reduce((a,b) => a + (b - mean) ** 2, 0) / count);
+    return {count, mean, median, min, max, stddev};
+  }
+
+  function normalPDF(x, mean, stddev) {
+    const variance = stddev * stddev;
+    return (1 / Math.sqrt(2 * Math.PI * variance)) * Math.exp(-((x - mean) ** 2) / (2 * variance));
+  }
+
+  function createHistogram(data, binCount = 20) {
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const binSize = (max - min) / binCount;
+    const bins = Array(binCount).fill(0);
+    data.forEach(val => {
+      let idx = Math.floor((val - min) / binSize);
+      if (idx === binCount) idx = binCount - 1;
+      bins[idx]++;
+    });
+    const totalCount = data.length;
+    return bins.map((count, i) => ({
+      x: min + binSize * (i + 0.5),
+      y: count / (totalCount * binSize)
+    }));
+  }
+
+  function PlotModule(config) {
+    this.fileInput = document.getElementById(config.fileInputId);
+    this.xSelect = document.getElementById(config.xSelectId);
+    this.ySelect = document.getElementById(config.ySelectId);
+    this.statsDiv = document.getElementById(config.statsDivId);
+    this.scatterCtx = document.getElementById(config.scatterCanvasId).getContext('2d');
+    this.normalCtx = document.getElementById(config.normalCanvasId).getContext('2d');
+
+    this.toggleRawPoints = document.getElementById(config.toggleRawPointsId);
+    this.toggleNormalCurve = document.getElementById(config.toggleNormalCurveId);
+    this.toggleMeanLine = document.getElementById(config.toggleMeanLineId);
+    this.toggleMedianLine = document.getElementById(config.toggleMedianLineId);
+    this.toggleStdBands = document.getElementById(config.toggleStdBandsId);
+    this.toggleHistogram = document.getElementById(config.toggleHistogramId);
+
+    this.parsedData = [];
+    this.stats = null;
+    this.scatterChart = null;
+    this.normalChart = null;
+
+    this.init = () => {
+      this.fileInput.addEventListener('change', this.handleFile.bind(this));
+      this.xSelect.addEventListener('change', () => { this.updateCharts(); updateComparisonChartWithManualScale(); });
+      this.ySelect.addEventListener('change', () => { this.updateCharts(); updateComparisonChartWithManualScale(); });
+      [this.toggleRawPoints, this.toggleNormalCurve, this.toggleMeanLine, this.toggleMedianLine, this.toggleStdBands, this.toggleHistogram].forEach(el => {
+        el.addEventListener('change', () => { this.updateNormalChart(); updateComparisonChartWithManualScale(); });
+      });
+    };
+
+    this.handleFile = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = evt => {
+        const text = evt.target.result;
+        Papa.parse(text, {
+          header: true,
+          skipEmptyLines: true,
+          complete: results => {
+            this.parsedData = results.data.map(row => {
+              const cleanRow = {};
+              for (const k in row) {
+                cleanRow[k.trim()] = (row[k] || '').trim();
+              }
+              return cleanRow;
+            });
+            this.setupSelects();
+          }
+        });
+      };
+      reader.readAsText(file);
+    };
+
+    this.setupSelects = () => {
+      const columns = Object.keys(this.parsedData[0]);
+      this.xSelect.innerHTML = '';
+      this.ySelect.innerHTML = '';
+      columns.forEach(col => {
+        const optX = document.createElement('option');
+        optX.value = col;
+        optX.textContent = col;
+        this.xSelect.appendChild(optX);
+        const optY = document.createElement('option');
+        optY.value = col;
+        optY.textContent = col;
+        this.ySelect.appendChild(optY);
+      });
+      this.xSelect.selectedIndex = 0;
+      this.ySelect.selectedIndex = columns.length > 1 ? 1 : 0;
+      this.xSelect.disabled = false;
+      this.ySelect.disabled = false;
+
+      this.updateCharts();
+      updateComparisonChartWithManualScale();
+    };
+
+    this.computeStats = (arr) => {
+      return computeStats(arr);
+    };
+
+    this.normalPDF = normalPDF;
+
+    this.createHistogram = createHistogram;
+
+    this.updateCharts = () => {
+      this.updateScatterChart();
+      this.updateNormalChart();
+    };
+
+    this.updateScatterChart = () => {
+      const xCol = this.xSelect.value;
+      const yCol = this.ySelect.value;
+      if (!xCol || !yCol) return;
+
+      const dataPoints = [];
+      const yValues = [];
+
+      this.parsedData.forEach(row => {
+        let xValRaw = row[xCol];
+        let yValRaw = row[yCol];
+        const yVal = parseFloat(yValRaw);
+        if (isNaN(yVal)) return;
+
+        let xVal;
+        if (!isNaN(Date.parse(xValRaw)) && isNaN(parseFloat(xValRaw))) {
+          xVal = new Date(xValRaw);
+        } else {
+          const xNum = parseFloat(xValRaw);
+          xVal = isNaN(xNum) ? xValRaw : xNum;
+        }
+
+        dataPoints.push({ x: xVal, y: yVal });
+        yValues.push(yVal);
+      });
+
+      if (dataPoints.length === 0) {
+        this.statsDiv.innerHTML = 'No valid numeric data points for selected columns.';
+        if(this.scatterChart) this.scatterChart.destroy();
+        return;
+      }
+
+      this.stats = this.computeStats(yValues);
+
+      this.statsDiv.innerHTML = `
+        <strong>Y-axis (${yCol}) Summary:</strong><br/>
+        Count: ${this.stats.count}<br/>
+        Mean: ${this.stats.mean.toFixed(4)}<br/>
+        Median: ${this.stats.median.toFixed(4)}<br/>
+        Std Dev: ${this.stats.stddev.toFixed(4)}<br/>
+        Min: ${this.stats.min}<br/>
+        Max: ${this.stats.max}
+      `;
+
+      if(this.scatterChart) this.scatterChart.destroy();
+
+      this.scatterChart = new Chart(this.scatterCtx, {
+        type: 'scatter',
+        data: {
+          datasets: [{
+            label: `Dataset - ${yCol} vs ${xCol}`,
+            data: dataPoints,
+            backgroundColor: config.scatterColor,
+            pointRadius: 3,
+            showLine: false,
+          }]
+        },
+        options: {
+          scales: {
+            x: { type: typeof dataPoints[0].x === 'object' ? 'time' : 'linear', ticks: { color: '#ccc' }, grid: { color: '#333' }, title: { display: true, text: xCol, color: '#ccc' } },
+            y: { ticks: { color: '#ccc' }, grid: { color: '#333' }, title: { display: true, text: yCol, color: '#ccc' } },
+          },
+          plugins: {
+            legend: { labels: { color: '#ccc' } },
+            tooltip: { mode: 'nearest', intersect: false },
+          },
+          maintainAspectRatio: false,
+        }
+      });
+    };
+
+    this.updateNormalChart = () => {
+      if (!this.stats) return;
+
+      const yCol = this.ySelect.value;
+      if (!yCol) return;
+
+      const yValues = this.parsedData.map(row => parseFloat(row[yCol])).filter(v => !isNaN(v));
+
+      if (yValues.length === 0) {
+        if (this.normalChart) this.normalChart.destroy();
+        return;
+      }
+
+      const mean = this.stats.mean;
+      const stddev = this.stats.stddev;
+
+      const step = (this.stats.max - this.stats.min) / 100 || 1;
+      const normalCurvePoints = [];
+      for (let x = this.stats.min; x <= this.stats.max; x += step) {
+        normalCurvePoints.push({ x, y: normalPDF(x, mean, stddev) });
+      }
+
+      // Histogram data if toggled on
+      let histogramData = [];
+      if (this.toggleHistogram.checked) {
+        histogramData = this.createHistogram(yValues, 20);
+      }
+
+      // Mean and median lines
+      const meanLine = { xMin: this.stats.min, xMax: this.stats.max, y: mean };
+      const medianLine = { xMin: this.stats.min, xMax: this.stats.max, y: this.stats.median };
+
+      if (this.normalChart) this.normalChart.destroy();
+
+      // Build datasets
+      const datasets = [];
+
+      if (this.toggleRawPoints.checked) {
+        // Scatter points vertically jittered to show distribution
+        const scatterPoints = yValues.map(v => ({
+          x: v,
+          y: 0.005 + Math.random() * 0.005
+        }));
+        datasets.push({
+          label: 'Raw Points',
+          data: scatterPoints,
+          backgroundColor: config.scatterColor,
+          type: 'scatter',
+          pointRadius: 3,
+          showLine: false,
+        });
+      }
+
+      if (this.toggleNormalCurve.checked) {
+        datasets.push({
+          label: 'Normal Distribution',
+          data: normalCurvePoints,
+          borderColor: config.scatterColor,
+          borderWidth: 2,
+          fill: false,
+          type: 'line',
+          pointRadius: 0,
+          tension: 0.3,
+        });
+      }
+
+      if (this.toggleMeanLine.checked) {
+        datasets.push({
+          label: 'Mean',
+          data: [{x: mean, y: 0}, {x: mean, y: Math.max(...normalCurvePoints.map(p => p.y)) * 1.2}],
+          borderColor: '#00ff00',
+          borderWidth: 1,
+          borderDash: [6, 6],
+          fill: false,
+          type: 'line',
+          pointRadius: 0,
+        });
+      }
+
+      if (this.toggleMedianLine.checked) {
+        datasets.push({
+          label: 'Median',
+          data: [{x: this.stats.median, y: 0}, {x: this.stats.median, y: Math.max(...normalCurvePoints.map(p => p.y)) * 1.2}],
+          borderColor: '#ffff00',
+          borderWidth: 1,
+          borderDash: [3, 3],
+          fill: false,
+          type: 'line',
+          pointRadius: 0,
+        });
+      }
+
+      if (this.toggleStdBands.checked) {
+        [1,2,3].forEach(n => {
+          datasets.push({
+            label: `±${n} Std Dev`,
+            data: [
+              {x: mean + stddev * n, y: 0},
+              {x: mean + stddev * n, y: Math.max(...normalCurvePoints.map(p => p.y)) * 0.6}
+            ],
+            borderColor: '#ff00ff',
+            borderWidth: 1,
+            borderDash: [2, 2],
+            fill: false,
+            type: 'line',
+            pointRadius: 0,
+          });
+          datasets.push({
+            label: `±${n} Std Dev`,
+            data: [
+              {x: mean - stddev * n, y: 0},
+              {x: mean - stddev * n, y: Math.max(...normalCurvePoints.map(p => p.y)) * 0.6}
+            ],
+            borderColor: '#ff00ff',
+            borderWidth: 1,
+            borderDash: [2, 2],
+            fill: false,
+            type: 'line',
+            pointRadius: 0,
+          });
+        });
+      }
+
+      if (this.toggleHistogram.checked) {
+        datasets.push({
+          label: 'Histogram',
+          data: histogramData,
+          backgroundColor: 'rgba(255, 255, 255, 0.3)',
+          type: 'bar',
+          borderWidth: 0,
+          barPercentage: 1.0,
+          categoryPercentage: 1.0,
+        });
+      }
+
+      this.normalChart = new Chart(this.normalCtx, {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+          scales: {
+            x: { 
+              type: 'linear', 
+              title: { display: true, text: yCol, color: '#ccc' },
+              ticks: { color: '#ccc' },
+              grid: { color: '#333' }
+            },
+            y: {
+              min: 0,
+              title: { display: true, text: 'Density / Frequency', color: '#ccc' },
+              ticks: { color: '#ccc' },
+              grid: { color: '#333' }
+            }
+          },
+          plugins: {
+            legend: { labels: { color: '#ccc' } },
+            tooltip: {
+              callbacks: {
+                label: ctx => {
+                  return `${ctx.dataset.label}: (${ctx.parsed.x.toFixed(4)}, ${ctx.parsed.y.toFixed(4)})`;
+                }
+              }
+            }
+          },
+          maintainAspectRatio: false,
+        }
+      });
+    };
+  }
+
+  // Initialize the two plot modules
+  const plot1 = new PlotModule({
+    fileInputId: 'csvFile1',
+    xSelectId: 'xSelect1',
+    ySelectId: 'ySelect1',
+    statsDivId: 'stats1',
+    scatterCanvasId: 'scatterChart1',
+    normalCanvasId: 'normalChart1',
+    toggleRawPointsId: 'toggleRawPoints1',
+    toggleNormalCurveId: 'toggleNormalCurve1',
+    toggleMeanLineId: 'toggleMeanLine1',
+    toggleMedianLineId: 'toggleMedianLine1',
+    toggleStdBandsId: 'toggleStdBands1',
+    toggleHistogramId: 'toggleHistogram1',
+    scatterColor: 'rgba(79,195,247,0.8)',
+  });
+
+  const plot2 = new PlotModule({
+    fileInputId: 'csvFile2',
+    xSelectId: 'xSelect2',
+    ySelectId: 'ySelect2',
+    statsDivId: 'stats2',
+    scatterCanvasId: 'scatterChart2',
+    normalCanvasId: 'normalChart2',
+    toggleRawPointsId: 'toggleRawPoints2',
+    toggleNormalCurveId: 'toggleNormalCurve2',
+    toggleMeanLineId: 'toggleMeanLine2',
+    toggleMedianLineId: 'toggleMedianLine2',
+    toggleStdBandsId: 'toggleStdBands2',
+    toggleHistogramId: 'toggleHistogram2',
+    scatterColor: 'rgba(255,112,67,0.8)',
+  });
+
+  // Comparison Chart setup
+  const compCanvas = document.getElementById('comparisonChart');
+  const compCtx = compCanvas.getContext('2d');
+
+  const showRaw1Checkbox = document.getElementById('showRaw1');
+  const showNormal1Checkbox = document.getElementById('showNormal1');
+  const showRaw2Checkbox = document.getElementById('showRaw2');
+  const showNormal2Checkbox = document.getElementById('showNormal2');
+
+  let comparisonChart = null;
+
+  // Manual scale inputs and buttons
+  const manualXMin = document.getElementById('manualXMin');
+  const manualXMax = document.getElementById('manualXMax');
+  const manualYMax = document.getElementById('manualYMax');
+  const applyScaleBtn = document.getElementById('applyScaleBtn');
+  const resetScaleBtn = document.getElementById('resetScaleBtn');
+
+  function updateComparisonChartWithManualScale() {
+    if (!plot1.stats || !plot2.stats) {
+      if (comparisonChart) {
+        comparisonChart.destroy();
+        comparisonChart = null;
+      }
+      document.getElementById('comparisonStats').innerHTML = 'Load and select Y columns for both datasets to compare.';
+      return;
+    }
+
+    const stats1 = plot1.stats;
+    const stats2 = plot2.stats;
+
+    // Prepare raw scatter data for Y-values overlay (with small vertical jitter)
+    const dataset1Scatter = [];
+    const dataset2Scatter = [];
+
+    plot1.parsedData.forEach(row => {
+      const y = parseFloat(row[plot1.ySelect.value]);
+      if (!isNaN(y)) dataset1Scatter.push({ x: y, y: 0.005 + Math.random() * 0.005 });
+    });
+
+    plot2.parsedData.forEach(row => {
+      const y = parseFloat(row[plot2.ySelect.value]);
+      if (!isNaN(y)) dataset2Scatter.push({ x: y, y: 0.005 + Math.random() * 0.005 });
+    });
+
+    function makeNormalCurveData(stats) {
+      const step = (stats.max - stats.min) / 100 || 1;
+      const points = [];
+      for (let x = stats.min; x <= stats.max; x += step) {
+        points.push({ x, y: normalPDF(x, stats.mean, stats.stddev) });
+      }
+      return points;
+    }
+
+    const normalData1 = makeNormalCurveData(stats1);
+    const normalData2 = makeNormalCurveData(stats2);
+
+    // Calculate auto axis limits
+    const minX = Math.min(stats1.min, stats2.min);
+    const maxX = Math.max(stats1.max, stats2.max);
+    const maxY = Math.max(...normalData1.map(p => p.y), ...normalData2.map(p => p.y)) * 1.2;
+
+    // Use manual values if valid
+    let xMin = parseFloat(manualXMin.value);
+    let xMax = parseFloat(manualXMax.value);
+    let yMaxManual = parseFloat(manualYMax.value);
+
+    if (isNaN(xMin) || xMin >= xMax) xMin = minX - 0.1 * (maxX - minX);
+    if (isNaN(xMax) || xMax <= xMin) xMax = maxX + 0.1 * (maxX - minX);
+    if (isNaN(yMaxManual) || yMaxManual <= 0) yMaxManual = maxY;
+
+    // Build datasets array
+    const datasets = [];
+
+    if (showRaw1Checkbox.checked) {
+      datasets.push({
+        label: 'Dataset 1 Raw Points',
+        data: dataset1Scatter,
+        backgroundColor: 'rgba(79,195,247,0.8)',
+        pointRadius: 3,
+        type: 'scatter',
+        showLine: false,
+      });
+    }
+
+    if (showNormal1Checkbox.checked) {
+      datasets.push({
+        label: 'Dataset 1 Normal Curve',
+        data: normalData1,
+        borderColor: 'rgba(79,195,247,1)',
+        borderWidth: 2,
+        fill: false,
+        pointRadius: 0,
+        tension: 0.3,
+        type: 'line',
+      });
+    }
+
+    if (showRaw2Checkbox.checked) {
+      datasets.push({
+        label: 'Dataset 2 Raw Points',
+        data: dataset2Scatter,
+        backgroundColor: 'rgba(255,112,67,0.8)',
+        pointRadius: 3,
+        type: 'scatter',
+        showLine: false,
+      });
+    }
+
+    if (showNormal2Checkbox.checked) {
+      datasets.push({
+        label: 'Dataset 2 Normal Curve',
+        data: normalData2,
+        borderColor: 'rgba(255,112,67,1)',
+        borderWidth: 2,
+        fill: false,
+        pointRadius: 0,
+        tension: 0.3,
+        type: 'line',
+      });
+    }
+
+    if (comparisonChart) comparisonChart.destroy();
+
+    comparisonChart = new Chart(compCtx, {
+      data: { datasets },
+      options: {
+        scales: {
+          x: {
+            type: 'linear',
+            title: { display: true, text: 'Y Values Overlay', color: '#ccc' },
+            min: xMin,
+            max: xMax,
+            ticks: { color: '#ccc' },
+            grid: { color: '#333' }
+          },
+          y: {
+            title: { display: true, text: 'Density (approx)', color: '#ccc' },
+            min: 0,
+            max: yMaxManual,
+            ticks: { color: '#ccc' },
+            grid: { color: '#333' }
+          }
+        },
+        plugins: {
+          legend: { labels: { color: '#ccc' } },
+          tooltip: {
+            callbacks: {
+              label: ctx => {
+                const lbl = ctx.dataset.label || '';
+                return `${lbl}: (${ctx.parsed.x.toFixed(2)}, ${ctx.parsed.y.toFixed(4)})`;
+              }
+            }
+          }
+        },
+        maintainAspectRatio: false,
+      },
+      type: 'scatter',
+    });
+
+    // Show stats summary
+    const compStatsDiv = document.getElementById('comparisonStats');
+    compStatsDiv.innerHTML = `
+      <strong>Dataset 1 (Y=${plot1.ySelect.value}):</strong> Count=${stats1.count}, Mean=${stats1.mean.toFixed(2)}, StdDev=${stats1.stddev.toFixed(2)}<br/>
+      <strong>Dataset 2 (Y=${plot2.ySelect.value}):</strong> Count=${stats2.count}, Mean=${stats2.mean.toFixed(2)}, StdDev=${stats2.stddev.toFixed(2)}
+    `;
+  }
+
+  // Debounce and event hookup
+  const updateComparisonChartDebounced = () => {
+    setTimeout(updateComparisonChartWithManualScale, 50);
+  };
+
+  [showRaw1Checkbox, showNormal1Checkbox, showRaw2Checkbox, showNormal2Checkbox].forEach(el => {
+    el.addEventListener('change', updateComparisonChartDebounced);
+  });
+
+  ['xSelect1','ySelect1','xSelect2','ySelect2'].forEach(id => {
+    document.getElementById(id).addEventListener('change', updateComparisonChartDebounced);
+  });
+
+  applyScaleBtn.addEventListener('click', updateComparisonChartDebounced);
+
+  resetScaleBtn.addEventListener('click', () => {
+    manualXMin.value = '';
+    manualXMax.value = '';
+    manualYMax.value = '';
+    updateComparisonChartDebounced();
+  });
+
+  // Initialize both plot modules
+  plot1.init();
+  plot2.init();
+
+</script>
+
+</body>
+</html>
