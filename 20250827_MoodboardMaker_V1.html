@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MOODBOARD MAKER V1</title>
+<style>
+body { font-family: Arial; background:#121212; color:#f0f0f0; padding:20px; margin:0;}
+h1 { font-size:20px; margin-bottom:10px; }
+#controls { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:10px; }
+input, select, button { padding:10px; border-radius:6px; border:1px solid #444; font-size:14px; }
+input, select { background:#1e1e1e; color:#f0f0f0; flex:1; }
+button { background:#2979ff; color:#fff; border:none; cursor:pointer; }
+button:hover { background:#1565c0; }
+#progressContainer { width:100%; background:#333; border-radius:6px; height:20px; margin-bottom:15px; }
+#progressBar { height:100%; width:0%; background:#2979ff; transition:width 0.3s ease; }
+#gridPreview { display:grid; gap:5px; min-height:200px; border:1px solid #444; border-radius:6px; padding:5px; margin-bottom:10px;}
+#dropArea { border:2px dashed #555; border-radius:6px; height:100px; display:flex; align-items:center; justify-content:center; margin-top:10px; color:#888; }
+.image-container { position:relative; overflow:hidden; cursor:grab; }
+.image-container img { width:100%; height:100%; object-fit:contain; border-radius:4px; border:1px solid #444; background:transparent; }
+.delete-btn { position:absolute; top:2px; right:2px; background:rgba(255,0,0,0.8); color:#fff; border:none; border-radius:50%; width:18px; height:18px; font-size:12px; cursor:pointer; }
+#fileInput { display:none; }
+
+/* Sketch modal updates */
+#sketchModal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); display:none; justify-content:center; align-items:center; z-index:1000; }
+#sketchWrapper { position:relative; width:95vw; max-width:1000px; aspect-ratio:16/9; border:2px solid #444; border-radius:6px; background:#fff; }
+#sketchCanvas { position:absolute; top:0; left:0; width:100%; height:100%; background:#fff; cursor:crosshair; }
+#sketchControls { display:flex; justify-content:flex-end; gap:10px; margin-top:5px; }
+@media(max-width:600px){ input, select, button{ width:100%; } h1{ font-size:18px; } }
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+
+<h1>MOODBOARD MAKER</h1>
+<div id="controls">
+<input type="text" id="filename" placeholder="Filename" />
+<input type="number" id="imagesPerLine" placeholder="Images per line" min="1" value="2" />
+<select id="pageOrientation">
+  <option value="portrait" selected>Portrait</option>
+  <option value="landscape">Landscape</option>
+</select>
+<button id="exportBtn">Export to PDF</button>
+<button id="saveSessionBtn">Save Session</button>
+<button id="loadSessionBtn">Load Session</button>
+<button id="addFilesBtn">Add Images</button>
+<button id="addSketchBtn">Add Sketch</button>
+<input type="file" id="fileInput" multiple accept="image/*">
+</div>
+
+<div id="progressContainer"><div id="progressBar"></div></div>
+<div id="gridPreview">Images will appear here</div>
+<div id="dropArea">Drag & drop images here to add them</div>
+
+<!-- Sketch Modal -->
+<div id="sketchModal">
+  <div style="background:#1e1e1e; padding:10px; border-radius:6px; display:flex; flex-direction:column; align-items:center; width:100%; max-width:1000px;">
+    <div id="sketchWrapper">
+      <canvas id="sketchCanvas"></canvas>
+    </div>
+    <div id="sketchControls" style="margin-top:5px; width:100%; display:flex; justify-content:flex-end; gap:10px;">
+      <button id="addSketchToBoardBtn">Add</button>
+      <button id="closeSketchBtn">Cancel</button>
+      <button id="clearSketchBtn">Clear</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+const { jsPDF } = window.jspdf;
+let images = [];
+const gridPreview = document.getElementById('gridPreview');
+const fileInput = document.getElementById('fileInput');
+const dropArea = document.getElementById('dropArea');
+const sketchModal = document.getElementById('sketchModal');
+const sketchCanvas = document.getElementById('sketchCanvas');
+const sketchCtx = sketchCanvas.getContext('2d');
+let drawing = false;
+
+// Resize sketch canvas to wrapper
+function resizeSketchCanvas() {
+  const wrapper = document.getElementById('sketchWrapper');
+  sketchCanvas.width = wrapper.clientWidth;
+  sketchCanvas.height = wrapper.clientHeight;
+  sketchCtx.fillStyle = "#fff";
+  sketchCtx.fillRect(0,0,sketchCanvas.width,sketchCanvas.height);
+}
+window.addEventListener('resize', resizeSketchCanvas);
+
+// Default filename
+function getDefaultFilename() {
+  const now = new Date(); 
+  const pad = n => n.toString().padStart(2,'0');
+  return now.getFullYear()+pad(now.getMonth()+1)+pad(now.getDate())+"_"+pad(now.getHours())+pad(now.getMinutes())+pad(now.getSeconds());
+}
+document.getElementById('filename').value = getDefaultFilename();
+
+// Save/load session
+function saveSession(){ 
+  localStorage.setItem('imageGridData', JSON.stringify({
+    images, 
+    imagesPerLine: document.getElementById('imagesPerLine').value, 
+    filename: document.getElementById('filename').value,
+    orientation: document.getElementById('pageOrientation').value
+  }));
+  alert("Session saved!");
+}
+function loadSession(){
+  const saved = localStorage.getItem('imageGridData');
+  if(saved){
+    const data = JSON.parse(saved);
+    images = data.images || [];
+    document.getElementById('imagesPerLine').value = data.imagesPerLine || 2;
+    document.getElementById('filename').value = data.filename || getDefaultFilename();
+    document.getElementById('pageOrientation').value = data.orientation || 'portrait';
+    renderGridPreview();
+    alert("Session loaded!");
+  } else { alert("No saved session found."); }
+}
+
+// Drag-and-drop helpers
+let dragSrcIndex = null;
+function handleDragStart(e){ dragSrcIndex = e.currentTarget.dataset.index; e.dataTransfer.effectAllowed='move'; }
+function handleDragOver(e){ e.preventDefault(); e.dataTransfer.dropEffect='move'; }
+function handleDrop(e){ 
+  e.stopPropagation();
+  const targetIndex = e.currentTarget.dataset.index;
+  if(dragSrcIndex===null || dragSrcIndex===targetIndex) return;
+  const dragged = images.splice(dragSrcIndex,1)[0];
+  images.splice(targetIndex,0,dragged);
+  renderGridPreview();
+}
+
+// Render preview grid
+function renderGridPreview(){
+  const perLine = Math.max(1, parseInt(document.getElementById('imagesPerLine').value,10));
+  gridPreview.style.gridTemplateColumns = `repeat(${perLine},1fr)`;
+  gridPreview.innerHTML='';
+  images.forEach((src,i)=>{
+    const container = document.createElement('div');
+    container.className='image-container';
+    container.draggable = true;
+    container.dataset.index = i;
+    container.addEventListener('dragstart',handleDragStart);
+    container.addEventListener('dragover',handleDragOver);
+    container.addEventListener('drop',handleDrop);
+
+    const img = document.createElement('img'); 
+    img.src = src;
+
+    const delBtn = document.createElement('button');
+    delBtn.className='delete-btn'; delBtn.innerHTML='×';
+    delBtn.onclick = ()=>{ images.splice(i,1); renderGridPreview(); };
+
+    container.appendChild(img);
+    container.appendChild(delBtn);
+    gridPreview.appendChild(container);
+  });
+}
+
+document.getElementById('imagesPerLine').addEventListener('input', () => { renderGridPreview(); });
+
+// Paste images from clipboard
+document.addEventListener('paste', e=>{
+  for(const item of e.clipboardData.items){
+    if(item.type.indexOf('image')!==-1){
+      const blob = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = ev => { images.push(ev.target.result); renderGridPreview(); };
+      reader.readAsDataURL(blob);
+    }
+  }
+});
+
+// Add images from file input
+document.getElementById('addFilesBtn').addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', e => {
+  const files = Array.from(e.target.files);
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = ev => { images.push(ev.target.result); renderGridPreview(); };
+    reader.readAsDataURL(file);
+  });
+  fileInput.value = '';
+});
+
+// Drag and drop files
+dropArea.addEventListener('dragover', e=>{ e.preventDefault(); dropArea.style.borderColor = '#2979ff'; });
+dropArea.addEventListener('dragleave', e=>{ dropArea.style.borderColor = '#555'; });
+dropArea.addEventListener('drop', e=>{
+  e.preventDefault(); dropArea.style.borderColor = '#555';
+  const files = Array.from(e.dataTransfer.files).filter(f=>f.type.startsWith('image/'));
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = ev => { images.push(ev.target.result); renderGridPreview(); };
+    reader.readAsDataURL(file);
+  });
+});
+
+// Sketch canvas
+document.getElementById('addSketchBtn').addEventListener('click', ()=>{ 
+  sketchModal.style.display='flex'; 
+  resizeSketchCanvas();
+});
+
+// Proper coordinate mapping
+function getSketchPos(e) {
+  const rect = sketchCanvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (sketchCanvas.width / rect.width),
+    y: (e.clientY - rect.top) * (sketchCanvas.height / rect.height)
+  };
+}
+
+sketchCanvas.addEventListener('mousedown', e=>{
+  drawing=true; 
+  const pos = getSketchPos(e);
+  sketchCtx.beginPath(); 
+  sketchCtx.moveTo(pos.x,pos.y); 
+});
+sketchCanvas.addEventListener('mousemove', e=>{ 
+  if(drawing){ 
+    const pos = getSketchPos(e);
+    sketchCtx.lineTo(pos.x,pos.y); 
+    sketchCtx.strokeStyle="#000"; 
+    sketchCtx.lineWidth=2; 
+    sketchCtx.stroke(); 
+  } 
+});
+sketchCanvas.addEventListener('mouseup', ()=>{ drawing=false; });
+sketchCanvas.addEventListener('mouseleave', ()=>{ drawing=false; });
+
+document.getElementById('closeSketchBtn').addEventListener('click', ()=>{ sketchModal.style.display='none'; });
+document.getElementById('clearSketchBtn').addEventListener('click', ()=>{ 
+  sketchCtx.fillStyle="#fff"; 
+  sketchCtx.fillRect(0,0,sketchCanvas.width, sketchCanvas.height); 
+});
+
+document.getElementById('addSketchToBoardBtn').addEventListener('click', ()=>{
+  const dataURL = sketchCanvas.toDataURL('image/png');
+  images.push(dataURL);
+  renderGridPreview();
+  sketchModal.style.display='none';
+});
+
+// Export PDF (unchanged)
+document.getElementById('exportBtn').addEventListener('click', async () => {
+  if (images.length === 0) { alert("No images to export!"); return; }
+  const orientation = document.getElementById('pageOrientation').value;
+  const pdf = new jsPDF(orientation, 'in', 'a4');
+
+  const perLine = Math.max(1, parseInt(document.getElementById('imagesPerLine').value, 10));
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 0.3;
+  const spacing = 0.05;
+  const progressBar = document.getElementById('progressBar');
+
+  const cellWidth = (pageWidth - 2*margin - (perLine-1)*spacing)/perLine;
+  const landscapeRatio = 1.5;
+  let cellHeight = cellWidth / landscapeRatio;
+  const maxRows = Math.floor((pageHeight - 2*margin + spacing)/cellHeight);
+  cellHeight = (pageHeight - 2*margin - (maxRows-1)*spacing)/maxRows;
+
+  let y = margin;
+  for (let i = 0; i < images.length; i += perLine) {
+    const rowImages = images.slice(i, i + perLine);
+    const loaded = await Promise.all(rowImages.map(src => new Promise(r => {
+      const img = new Image();
+      img.src = src;
+      img.onload = () => r({ src, w: img.width, h: img.height });
+    })));
+    if (y + cellHeight > pageHeight - margin) { pdf.addPage(); y = margin; }
+
+    let x = margin;
+    for (let j = 0; j < loaded.length; j++) {
+      const img = loaded[j];
+      const imgRatio = img.w / img.h;
+      let imgW, imgH;
+      const cellRatio = cellWidth / cellHeight;
+      if (imgRatio >= cellRatio) { imgW = cellWidth; imgH = cellWidth / imgRatio; }
+      else { imgH = cellHeight; imgW = cellHeight * imgRatio; }
+      pdf.addImage(img.src, 'JPEG', x + (cellWidth-imgW)/2, y + (cellHeight-imgH)/2, imgW, imgH);
+      x += cellWidth + spacing;
+    }
+    y += cellHeight + spacing;
+    progressBar.style.width = Math.min(100, ((i + loaded.length)/images.length*100)) + '%';
+    await new Promise(r => setTimeout(r,5));
+  }
+  const filename = document.getElementById('filename').value.trim() || getDefaultFilename();
+  pdf.save(filename + '.pdf');
+});
+
+// Session buttons
+document.getElementById('saveSessionBtn').addEventListener('click', ()=>saveSession());
+document.getElementById('loadSessionBtn').addEventListener('click', ()=>loadSession());
+
+window.addEventListener('resize', renderGridPreview);
+</script>
+</body>
+</html>
