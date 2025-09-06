@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CSV to Screenplay</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+body { font-family: monospace; background:#000; color:#0F0; margin:0; padding:0; }
+#controls { 
+  position: fixed; top:0; left:0; width:100%; 
+  padding:1em; background:#000; color:#0F0; display:flex; gap:1em; align-items:center; z-index:1000;
+  border-bottom: 1px solid #0F0;
+}
+#canvasContainer {
+  margin-top:70px; 
+  padding-bottom:50px;
+  overflow-y: auto;
+  max-height: calc(100vh - 70px);
+}
+canvas { display:block; margin:1em auto; background:white; box-shadow:0 0 12px #888; border:1px solid #444; }
+input[type=file] { color:#0F0; background:#000; border:1px solid #0F0; padding:0.3em; }
+button { padding:0.5em 1em; background:#000; color:#0F0; border:1px solid #0F0; cursor:pointer; }
+button:hover { background:#0F0; color:#000; }
+</style>
+</head>
+<body>
+<div id="controls">
+  <input type="file" id="csvFile" accept=".csv" />
+  <button id="exportBtn">Export PDF</button>
+</div>
+<div id="canvasContainer"></div>
+
+<script>
+const { jsPDF } = window.jspdf;
+const PAGE = { width:612, height:792 };
+const TOP=72, BOTTOM=72, LEFT=108, RIGHT=72, LINE_H=14;
+const DIALOGUE_LEFT=200, DIALOGUE_RIGHT=PAGE.width-150, PAREN_LEFT=216, PAREN_RIGHT=PAGE.width-216;
+const BASE_FONT="12pt Courier", BASE_FONT_BOLD="bold 12pt Courier";
+
+function upper(v){ return (v||'').toUpperCase(); }
+function ensureParentheses(t){ t=t.trim(); if(!t.startsWith('(')) t='('+t; if(!t.endsWith(')')) t+=')'; return t; }
+function isParentheticalText(t){ return t && t.trim().startsWith('(') && t.trim().endsWith(')'); }
+function normalizeLines(str){ return str ? str.replace(/\r\n/g,'\n').replace(/\r/g,'\n').split('\n') : []; }
+
+let rows=[];
+const container=document.getElementById('canvasContainer');
+
+document.getElementById('csvFile').addEventListener('change', e=>{
+  const file=e.target.files[0]; if(!file) return;
+  Papa.parse(file,{ header:true, skipEmptyLines:true, complete: r=>{
+    rows=r.data.filter(r=>r.Element && r.Content).map(r=>({ Element:r.Element.trim(), Content:r.Content.trim() }));
+    renderAllPages();
+  }});
+});
+
+document.getElementById('exportBtn').addEventListener('click', ()=>{ exportPDF(); });
+
+function wrapLines(ctx,text,maxWidth){
+  const words=text.split(/\s+/); let lines=[], line='';
+  for(let w of words){
+    const test=(line?line+' ':'')+w;
+    if(ctx.measureText(test).width>maxWidth && line){ lines.push(line); line=w; }
+    else line=test;
+  }
+  if(line) lines.push(line);
+  return lines;
+}
+
+function spacingBefore(element){
+  switch(element){
+    case 'scene': return LINE_H*2;
+    case 'action': return LINE_H;
+    case 'character': return LINE_H*2;
+    case 'parenthetical': return LINE_H;
+    case 'dialogue': return LINE_H/2;
+    case 'transition': return LINE_H*2;
+    default: return LINE_H;
+  }
+}
+
+function createCanvasPage(height){
+  const c = document.createElement('canvas');
+  c.width = PAGE.width;
+  c.height = height;
+  c.style.display = 'block';
+  c.style.margin = '1em auto';
+  container.appendChild(c);
+  return c; // return the canvas element, not the context
+}
+
+
+function renderAllPages() {
+  container.innerHTML = '';
+
+  const canvasPages = [];
+  let pageIndex = 0;
+
+  // --- Font & layout settings ---
+  const FONT_SIZE = 12;         // normal text
+  const TITLE_FONT_SIZE = 24;   // main title
+  const LINE_H = FONT_SIZE * 1.2;  
+  const TITLE_LINE_H = TITLE_FONT_SIZE * 1.2;
+
+  // --- Title Page ---
+  const titleCanvas = createCanvasPage(PAGE.height);
+  const titleCtx = titleCanvas.getContext('2d');
+  canvasPages.push(titleCanvas);
+
+  titleCtx.fillStyle = 'white';
+  titleCtx.fillRect(0, 0, PAGE.width, PAGE.height);
+  titleCtx.fillStyle = 'black';
+  titleCtx.textBaseline = 'top';
+
+  const topInfoLines = normalizeLines(rows.find(r => r.Element.toLowerCase() === 'top info')?.Content);
+  const tTopLines = normalizeLines(rows.find(r => r.Element.toLowerCase() === 'titletop')?.Content);
+  const titleLines = normalizeLines(rows.find(r => r.Element.toLowerCase() === 'title')?.Content);
+  const tBottomLines = normalizeLines(rows.find(r => r.Element.toLowerCase() === 'titlebottom')?.Content);
+  const bottomInfoLines = normalizeLines(rows.find(r => r.Element.toLowerCase() === 'bottom info')?.Content);
+
+  // --- Top info ---
+  let yTop = PAGE.height * 0.10;
+  titleCtx.font = `${FONT_SIZE}px Courier`;
+  titleCtx.textAlign = 'left';
+  topInfoLines.forEach(line => { titleCtx.fillText(line, LEFT, yTop); yTop += LINE_H; });
+
+  // --- Title top lines ---
+  let yTopTitle = PAGE.height * 0.20;
+  titleCtx.textAlign = 'center';
+  tTopLines.forEach(line => { titleCtx.fillText(upper(line), PAGE.width / 2, yTopTitle); yTopTitle += LINE_H; });
+
+  // --- Main title (bold) ---
+  let yTitle = (PAGE.height * 0.5) - (titleLines.length * (TITLE_LINE_H + 6) / 2);
+  titleCtx.font = `bold ${TITLE_FONT_SIZE}px Courier`;
+  titleLines.forEach(line => { titleCtx.fillText(upper(line), PAGE.width / 2, yTitle); yTitle += TITLE_LINE_H + 6; });
+
+  // --- Title bottom lines ---
+  titleCtx.font = `${FONT_SIZE}px Courier`;
+  let yBottom = PAGE.height * 0.65;
+  tBottomLines.forEach(line => { titleCtx.fillText(line, PAGE.width / 2, yBottom); yBottom += LINE_H; });
+
+  // --- Bottom info ---
+  titleCtx.textAlign = 'right';
+  let yBottomInfo = PAGE.height * 0.85;
+  bottomInfoLines.forEach(line => { titleCtx.fillText(line, PAGE.width - RIGHT, yBottomInfo); yBottomInfo += LINE_H; });
+
+  // --- First Script Page ---
+  let y = TOP;
+  let pageCanvas = createCanvasPage(PAGE.height);
+  let pageCtx = pageCanvas.getContext('2d');
+  canvasPages.push(pageCanvas);
+  pageIndex = 1;
+
+  pageCtx.fillStyle = 'white';
+  pageCtx.fillRect(0, 0, PAGE.width, PAGE.height);
+  pageCtx.fillStyle = 'black';
+  pageCtx.textBaseline = 'top';
+
+  // --- FADE IN ---
+  pageCtx.font = `${FONT_SIZE}px Courier`;
+  pageCtx.textAlign = 'left';
+  pageCtx.fillText('FADE IN:', LEFT, y);
+  y += LINE_H * 2;
+
+  // --- Page number ---
+  pageCtx.textAlign = 'right';
+  pageCtx.fillText(pageIndex, PAGE.width - RIGHT, TOP / 2);
+
+  let currentCharacter = '';
+
+  rows.forEach(row => {
+    const el = row.Element.toLowerCase();
+    if (['title','titletop','titlebottom','top info','bottom info'].includes(el)) return;
+
+    let content = row.Content;
+    if(el === 'scene') content = upper(content);
+    if(el === 'parenthetical') content = ensureParentheses(content);
+    const treatAsParenthetical = el === 'parenthetical' || (el === 'dialogue' && isParentheticalText(content));
+
+    y += spacingBefore(el);
+
+    let leftX = LEFT, rightX = PAGE.width - RIGHT, align = 'left';
+
+    // Only main title is bold; everything else normal
+    let fontStyle = 'normal';
+    if(el === 'character'){ align = 'center'; leftX = PAGE.width / 2; content = upper(content); currentCharacter = content; }
+    else if(treatAsParenthetical){ align = 'center'; leftX = PAGE.width / 2; rightX = PAREN_RIGHT; }
+    else if(el === 'dialogue'){ leftX = DIALOGUE_LEFT; rightX = DIALOGUE_RIGHT; }
+
+    pageCtx.font = `${fontStyle} ${FONT_SIZE}px Courier`;
+
+    // wrap text
+    const lines = wrapLines(pageCtx, content, rightX - leftX);
+
+    lines.forEach(line => {
+      if (y + LINE_H > PAGE.height - BOTTOM) {
+        // new page
+        y = TOP;
+        pageCanvas = createCanvasPage(PAGE.height);
+        pageCtx = pageCanvas.getContext('2d');
+        canvasPages.push(pageCanvas);
+
+        pageCtx.fillStyle = 'white';
+        pageCtx.fillRect(0, 0, PAGE.width, PAGE.height);
+        pageCtx.fillStyle = 'black';
+        pageCtx.textBaseline = 'top';
+        pageCtx.font = `${FONT_SIZE}px Courier`;
+
+        // page number
+        pageCtx.textAlign = 'right';
+        pageCtx.fillText(++pageIndex, PAGE.width - RIGHT, TOP / 2);
+
+        if (el === 'dialogue') {
+          pageCtx.textAlign = 'center';
+          pageCtx.fillText(currentCharacter + ' (CONT’D)', PAGE.width / 2, y);
+          y += LINE_H * 2;
+          pageCtx.textAlign = 'left';
+        }
+      }
+
+      pageCtx.textAlign = align;
+      pageCtx.fillText(line, leftX, y);
+      y += LINE_H;
+    });
+
+    y += (el === 'dialogue' ? LINE_H : 0);
+  });
+
+  // FADE OUT
+  if (y + LINE_H * 2 < PAGE.height - BOTTOM) {
+    pageCtx.font = `${FONT_SIZE}px Courier`;
+    pageCtx.textAlign = 'right';
+    pageCtx.fillText('FADE OUT.', PAGE.width - RIGHT, y + LINE_H * 2);
+  }
+}
+
+
+
+// --- PDF Export ---
+function exportPDF(){
+  const doc = new jsPDF({ unit:'pt', format:'letter' });
+  doc.setFont('courier','normal'); doc.setFontSize(12);
+
+  // --- File name ---
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const dd = String(now.getDate()).padStart(2,'0');
+  let defaultFilename = `${yyyy}${mm}${dd}_screenplay.pdf`;
+  let filename = prompt("Enter filename for PDF:", defaultFilename);
+  if(!filename) filename = defaultFilename;
+
+  const topInfoLines = normalizeLines(rows.find(r=>r.Element.toLowerCase()==='top info')?.Content);
+  const tTopLines = normalizeLines(rows.find(r=>r.Element.toLowerCase()==='titletop')?.Content);
+  const titleLines = normalizeLines(rows.find(r=>r.Element.toLowerCase()==='title')?.Content);
+  const tBottomLines = normalizeLines(rows.find(r=>r.Element.toLowerCase()==='titlebottom')?.Content);
+  const bottomInfoLines = normalizeLines(rows.find(r=>r.Element.toLowerCase()==='bottom info')?.Content);
+
+  // --- Title Page PDF ---
+  let yTop=PAGE.height*0.10; topInfoLines.forEach(line=>{ doc.text(line,LEFT,yTop,{align:'left'}); yTop+=LINE_H+2; });
+  let yTopTitle=PAGE.height*0.20; tTopLines.forEach(line=>{ doc.text(upper(line),PAGE.width/2,yTopTitle,{align:'center'}); yTopTitle+=LINE_H+2; });
+  let yTitle=(PAGE.height*0.5)-(titleLines.length*(LINE_H+6)/2); doc.setFont('courier','bold'); doc.setFontSize(24);
+  titleLines.forEach(line=>{ doc.text(upper(line), PAGE.width/2, yTitle,{align:'center'}); yTitle+=LINE_H+6; }); doc.setFont('courier','normal'); doc.setFontSize(12);
+  let yBottom=PAGE.height*0.65; tBottomLines.forEach(line=>{ doc.text(line,PAGE.width/2,yBottom,{align:'center'}); yBottom+=LINE_H+2; });
+  let yBottomInfo=PAGE.height*0.85; bottomInfoLines.forEach(line=>{ doc.text(line,PAGE.width-RIGHT,yBottomInfo,{align:'right'}); yBottomInfo+=LINE_H+2; });
+
+  // --- Script Pages PDF ---
+  let pageNum = 1; // first script page
+
+  const addPageNumber = () => {
+    doc.setFont('courier','normal'); doc.setFontSize(12);
+    doc.text(String(pageNum), PAGE.width - RIGHT, TOP / 2, { align: 'right' });
+    pageNum++;
+  };
+
+  doc.addPage(); 
+  addPageNumber();
+  let y=TOP; 
+  let currentCharacter='';
+
+  // Add FADE IN:
+  doc.setFont('courier','normal');
+  doc.text('FADE IN:', LEFT, y, { align: 'left' });
+  y += LINE_H * 2;
+
+  const addLines=(lines,x,align='left',charName='',isDialogue=false)=>{
+    lines.forEach(line=>{
+      if(y+LINE_H>PAGE.height-BOTTOM){
+        doc.addPage(); 
+        addPageNumber();
+        y=TOP;
+        if(isDialogue && charName){ 
+          doc.setFont('courier','normal'); 
+          doc.text(charName+' (CONT’D)',PAGE.width/2,y,{align:'center'}); 
+          y+=LINE_H*2; 
+          doc.setFont('courier','normal'); 
+        }
+      }
+      doc.text(line,x,y,{align}); y+=LINE_H;
+    });
+  };
+
+  rows.forEach(row=>{
+    const el=row.Element.toLowerCase(); 
+    if(['title','titletop','titlebottom','top info','bottom info'].includes(el)) return;
+    let content=row.Content; 
+    if(el==='scene') content=upper(content);
+    if(el==='parenthetical') content=ensureParentheses(content);
+    const treatAsParenthetical=el==='parenthetical'||(el==='dialogue'&&isParentheticalText(content));
+
+    y += spacingBefore(el);
+
+    let x=LEFT, align='left', isDialogue=false;
+    if(el==='scene'){ doc.setFont('courier','normal'); align='left'; }
+    else if(el==='action'){ doc.setFont('courier','normal'); align='left'; }
+    else if(el==='character'){ doc.setFont('courier','normal'); align='center'; x=PAGE.width/2; content=upper(content); currentCharacter=content; }
+    else if(treatAsParenthetical){ doc.setFont('courier','normal'); align='center'; x=PAGE.width/2; }
+    else if(el==='dialogue'){ doc.setFont('courier','normal'); align='left'; x=DIALOGUE_LEFT; isDialogue=true; }
+
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.font='12pt Courier';
+    const lines = wrapLines(ctx,content,el==='dialogue'?DIALOGUE_RIGHT-DIALOGUE_LEFT:PAGE.width-LEFT-RIGHT);
+    addLines(lines,x,align,currentCharacter,isDialogue);
+  });
+
+  doc.setFont('courier','normal'); 
+  doc.text('FADE OUT.', PAGE.width-RIGHT,y+LINE_H*2,{align:'right'});
+
+  doc.save(filename);
+}
+
+
+</script>
+</body>
+</html>
