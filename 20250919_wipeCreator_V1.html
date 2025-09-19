@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Before/After Wipe — Standalone Tool</title>
+  <style>
+    :root{
+      --bg:#0b0b0d; --card:#0f1113; --muted:#9aa0a6; --accent:#6ee7b7; --panel:#111315; --glass: rgba(255,255,255,0.03);
+    }
+    @media (prefers-color-scheme: light){
+      :root{ --bg:#f6f7f8; --card:#ffffff; --muted:#555; --accent:#0077cc; --panel:#f0f2f4; --glass: rgba(0,0,0,0.03);} 
+    }
+    html,body{height:100%;margin:0;font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:var(--bg); color:#999999}
+    .app{max-width:1100px;margin:20px auto;padding:18px;display:grid;grid-template-columns:340px 1fr;gap:18px}
+    @media (max-width:900px){.app{grid-template-columns:1fr; padding:12px}}
+    .panel{background:linear-gradient(180deg,var(--card),var(--panel));border-radius:12px;padding:14px;box-shadow:0 6px 20px rgba(0,0,0,0.5)}
+    h1{font-size:18px;margin:0 0 10px 0}
+    label{display:block;font-size:12px;color:var(--muted);margin-top:10px}
+    input[type=file]{width:100%}
+    .row{display:flex;gap:8px}
+    select,input[type=number],input[type=text]{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    button{background:var(--accent);border:0;padding:10px 12px;border-radius:8px;cursor:pointer;color:#021; font-weight:600}
+    .preview-wrap{display:flex;flex-direction:column;height:100%;gap:12px}
+    .canvas-card{flex:1;border-radius:12px;overflow:hidden;background:var(--glass);display:flex;align-items:center;justify-content:center;padding:12px}
+    canvas{display:block;max-width:100%;height:auto;border-radius:6px; background:#000}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .small{font-size:12px}
+    .muted{color:var(--muted)}
+    .footer{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+    .pill{background:rgba(255,255,255,0.03);padding:6px 10px;border-radius:999px;font-size:13px}
+    .hint{font-size:12px;color:var(--muted);margin-top:6px}
+    a{color:var(--accent)}
+    progress{width:100%; height:16px; border-radius:8px; overflow:hidden;}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="panel">
+      <h1>Before → After Wipe Tool</h1>
+      <div class="hint">Load two images, pick size and transition options, then <strong>Render Video</strong>. Uses your browser only.</div>
+
+      <label class="small">Before image (A)</label>
+      <input id="fileA" type="file" accept="image/*">
+      <label class="small">After image (B)</label>
+      <input id="fileB" type="file" accept="image/*">
+
+      <label>Aspect ratio</label>
+      <div class="row">
+        <select id="aspectSelect">
+          <option value="16:9">16:9</option>
+          <option value="4:3">4:3</option>
+          <option value="1:1">1:1</option>
+          <option value="9:16">9:16 (vertical)</option>
+          <option value="custom">Custom</option>
+        </select>
+        <input id="widthInput" type="number" min="64" value="1280" title="width (px)">
+        <input id="heightInput" type="number" min="64" value="720" title="height (px)">
+      </div>
+
+      <label>Wipe duration (seconds)</label>
+      <input id="duration" type="number" min="0.1" step="0.1" value="1.2">
+
+      <label>Wipe direction</label>
+      <div class="row">
+        <select id="direction">
+          <option value="ltr">Left → Right</option>
+          <option value="rtl">Right → Left</option>
+          <option value="pingpong">Left → Right → Left (ping-pong)</option>
+        </select>
+        <select id="easing">
+          <option value="linear">Linear</option>
+          <option value="easeIn">Ease-in</option>
+          <option value="easeOut">Ease-out</option>
+          <option value="easeInOut">Ease-in-out</option>
+        </select>
+      </div>
+
+      <label>Wipe margin (soft-edge) — blur radius (px)</label>
+      <div class="row">
+        <input id="margin" type="number" min="0" max="200" value="40">
+        <label class="small muted">Opacity edge</label>
+      </div>
+
+      <label>Playback fps (recording)</label>
+      <input id="fps" type="number" min="8" max="60" value="30">
+
+      <div style="margin-top:12px;display:flex;gap:8px">
+        <button id="previewBtn">Preview</button>
+        <button id="renderBtn">Render Video</button>
+        <button id="downloadBtn" disabled>Download</button>
+      </div>
+
+      <progress id="progressBar" max="100" value="0" style="margin-top:10px;display:none"></progress>
+
+      <div class="hint" style="margin-top:10px">Notes: Video is recorded in webm (MediaRecorder). Some browsers (Safari) may not support webm or canvas capture. Use Chrome/Firefox for best results.</div>
+
+    </div>
+
+    <div class="panel preview-wrap">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div class="pill">Preview</div>
+        <div class="muted small">Canvas size: <span id="sizeLabel">1280×720</span></div>
+      </div>
+
+      <div class="canvas-card">
+        <canvas id="mainCanvas" width="1280" height="720"></canvas>
+      </div>
+
+      <div class="footer">
+        <div class="muted small">When rendering, avoid navigating away.</div>
+        <div id="status" class="small muted">Idle</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function parseAspect(as){ if(!as) return null; const parts=as.split(':'); return [parseInt(parts[0],10),parseInt(parts[1],10)]; }
+
+    const fileA=document.getElementById('fileA');
+    const fileB=document.getElementById('fileB');
+    const canvas=document.getElementById('mainCanvas');
+    const ctx=canvas.getContext('2d');
+    const widthInput=document.getElementById('widthInput');
+    const heightInput=document.getElementById('heightInput');
+    const aspectSelect=document.getElementById('aspectSelect');
+    const durationInput=document.getElementById('duration');
+    const marginInput=document.getElementById('margin');
+    const fpsInput=document.getElementById('fps');
+    const directionSelect=document.getElementById('direction');
+    const easingSelect=document.getElementById('easing');
+    const previewBtn=document.getElementById('previewBtn');
+    const renderBtn=document.getElementById('renderBtn');
+    const downloadBtn=document.getElementById('downloadBtn');
+    const status=document.getElementById('status');
+    const sizeLabel=document.getElementById('sizeLabel');
+    const progressBar=document.getElementById('progressBar');
+
+    let imgA=null,imgB=null; let recordedBlob=null; let animHandle=null;
+
+    function loadImageFromFile(file){ return new Promise((res,rej)=>{ const url=URL.createObjectURL(file); const img=new Image(); img.onload=()=>{URL.revokeObjectURL(url);res(img);}; img.onerror=(e)=>rej(e); img.src=url; }); }
+
+    fileA.addEventListener('change',async(e)=>{ if(e.target.files?.[0]){ imgA=await loadImageFromFile(e.target.files[0]); drawStatic(); }});
+    fileB.addEventListener('change',async(e)=>{ if(e.target.files?.[0]){ imgB=await loadImageFromFile(e.target.files[0]); drawStatic(); }});
+
+    aspectSelect.addEventListener('change',()=>{ const v=aspectSelect.value; if(v==='custom') return; const [a,b]=parseAspect(v); const w=parseInt(widthInput.value||1280,10); widthInput.value=w; heightInput.value=Math.round(w*(b/a)); updateCanvasSize(); });
+    widthInput.addEventListener('change',()=>{ const v=aspectSelect.value; if(v!=='custom'){ const [a,b]=parseAspect(v); heightInput.value=Math.round(parseInt(widthInput.value,10)*(b/a)); } updateCanvasSize(); });
+    heightInput.addEventListener('change',()=>{ updateCanvasSize(); });
+
+    function updateCanvasSize(){ const w=Math.max(64,Math.min(3840,parseInt(widthInput.value)||1280)); const h=Math.max(64,Math.min(3840,parseInt(heightInput.value)||720)); canvas.width=w; canvas.height=h; sizeLabel.textContent=w+'×'+h; drawStatic(); }
+
+    function drawMask(ctx,w,h,pos,dir,margin){
+      const edgeX=Math.round(pos*w);
+      ctx.filter = `blur(${margin}px)`; // <-- blur applied
+      ctx.beginPath();
+      if(dir==='rtl'){
+        const grad=ctx.createLinearGradient(edgeX-margin,0,edgeX+margin,0);
+        grad.addColorStop(0,'rgba(0,0,0,1)');
+        grad.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle='rgba(0,0,0,1)'; ctx.fillRect(edgeX,0,w-edgeX,h);
+        ctx.fillStyle=grad; ctx.fillRect(edgeX-margin,0,margin*2,h);
+      } else {
+        const grad=ctx.createLinearGradient(edgeX-margin,0,edgeX+margin,0);
+        grad.addColorStop(0,'rgba(0,0,0,0)');
+        grad.addColorStop(1,'rgba(0,0,0,1)');
+        ctx.fillStyle='rgba(0,0,0,1)'; ctx.fillRect(0,0,edgeX,h);
+        ctx.fillStyle=grad; ctx.fillRect(edgeX-margin,0,margin*2,h);
+      }
+      ctx.filter = 'none'; // reset filter
+    }
+
+    function drawFrame(progress){
+      if(!imgA||!imgB){ ctx.fillStyle='#111'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#999'; ctx.fillText('Load both images',20,40); return; }
+      drawImageCover(ctx,imgA,0,0,canvas.width,canvas.height);
+      const dir=directionSelect.value; let pos=progress; if(dir==='rtl') pos=1-progress;
+      const temp=document.createElement('canvas'); temp.width=canvas.width; temp.height=canvas.height; const tctx=temp.getContext('2d');
+      drawImageCover(tctx,imgB,0,0,temp.width,temp.height);
+      tctx.globalCompositeOperation='destination-in';
+      const mask=document.createElement('canvas'); mask.width=canvas.width; mask.height=canvas.height; const mctx=mask.getContext('2d');
+      drawMask(mctx,canvas.width,canvas.height,pos,(dir==='rtl')?'rtl':'ltr',Number(marginInput.value));
+      tctx.drawImage(mask,0,0);
+      ctx.drawImage(temp,0,0);
+    }
+
+    function drawImageCover(cctx,image,x,y,w,h){ const iw=image.width,ih=image.height; const r=Math.max(w/iw,h/ih); const nw=iw*r,nh=ih*r; const cx=(w-nw)/2,cy=(h-nh)/2; cctx.drawImage(image,cx,cy,nw,nh); }
+
+    const EASINGS={ linear:t=>t, easeIn:t=>t*t*t, easeOut:t=>1-Math.pow(1-t,3), easeInOut:t=> t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2 };
+
+    function animatePreview(){ cancelAnimationFrame(animHandle); const dur=Math.max(0.05,Number(durationInput.value)||1.0)*1000; const easing=EASINGS[easingSelect.value]||EASINGS.linear; const dir=directionSelect.value; const start=performance.now(); function tick(now){ const elapsed=now-start; let t=Math.min(1,elapsed/dur); let prog=easing(t); if(dir==='pingpong'){ const cycleDur=dur*2; const cycT=(elapsed%cycleDur)/cycleDur; const phase=cycT*2; if(phase<=1) prog=easing(phase); else prog=easing(2-phase); } drawFrame(prog); animHandle=requestAnimationFrame(tick); } animHandle=requestAnimationFrame(tick); }
+
+    previewBtn.addEventListener('click',()=>{ status.textContent='Previewing'; animatePreview(); });
+
+    function drawStatic(){ cancelAnimationFrame(animHandle); status.textContent='Idle'; drawFrame(0); }
+
+    async function renderVideo(){
+      if(!imgA||!imgB){ alert('Load both images first'); return; }
+      renderBtn.disabled=true; previewBtn.disabled=true; downloadBtn.disabled=true; progressBar.style.display='block'; progressBar.value=0; status.textContent='Rendering...';
+
+      const fps=Math.max(8,Math.min(60,Number(fpsInput.value)||30));
+      const durSec=Math.max(0.05,Number(durationInput.value)||1.0);
+      const dir=directionSelect.value;
+      const cycles=(dir==='pingpong')?2:1;
+      const totalSec=durSec*cycles;
+      const totalFrames=Math.ceil(totalSec*fps);
+
+      const stream=canvas.captureStream(fps); let recorder; let chunks=[];
+      try{ recorder=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp9'});}catch(e){ try{recorder=new MediaRecorder(stream);}catch(err){ alert('MediaRecorder not supported'); renderBtn.disabled=false; previewBtn.disabled=false; status.textContent='Idle'; return; }}
+      recorder.ondataavailable=e=>{ if(e.data&&e.data.size) chunks.push(e.data); };
+      recorder.onstop=()=>{ recordedBlob=new Blob(chunks,{type:'video/webm'}); downloadBtn.disabled=false; status.textContent='Rendered'; renderBtn.disabled=false; previewBtn.disabled=false; progressBar.style.display='none'; };
+
+      recorder.start();
+      const easing=EASINGS[easingSelect.value]||EASINGS.linear;
+
+      for(let f=0;f<totalFrames;f++){
+        const t=f/(totalFrames-1);
+        let progRaw=t;
+        if(dir==='pingpong'){ if(t<=0.5) progRaw=t*2; else progRaw=(1-(t-0.5)*2); }
+        else if(dir==='rtl'){ progRaw=1-t; }
+        const prog=easing(progRaw);
+
+        drawFrame(prog);
+        progressBar.value=Math.round((f/totalFrames)*100);
+
+        await new Promise(r=>requestAnimationFrame(r));
+      }
+
+      await new Promise(r=>setTimeout(r,200));
+      recorder.stop();
+    }
+
+    renderBtn.addEventListener('click',async()=>{ await renderVideo(); });
+    downloadBtn.addEventListener('click',()=>{ if(!recordedBlob) return; const url=URL.createObjectURL(recordedBlob); const a=document.createElement('a'); a.href=url; a.download='wipe.webm'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); });
+    updateCanvasSize();
+  </script>
+</body>
+</html>
