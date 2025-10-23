@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Matrix Timer</title>
+<style>
+  body {
+    font-family: 'Consolas', monospace;
+    background-color: #000;
+    color: #00ff66;
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: row;
+  }
+
+  .sidebar {
+    width: 350px;
+    border-right: 1px solid #00ff66;
+    padding: 10px;
+    overflow-y: auto;
+  }
+
+  .timer-area {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+
+  h1 {
+    text-align: center;
+    color: #00ff66;
+  }
+
+  .time-display {
+    font-size: 4rem;
+    letter-spacing: 2px;
+    margin: 20px 0;
+  }
+
+  .export-btn, .load-btn {
+    border: 1px solid #00ff66;
+    background: transparent;
+    color: #00ff66;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: 0.2s;
+    width: 100%;
+    margin-top: 8px;
+  }
+
+  .export-btn:hover, .load-btn:hover {
+    background-color: #00ff66;
+    color: #000;
+  }
+
+  .entry {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    padding: 4px 6px;
+    border-radius: 4px;
+  }
+
+  .entry.highlighted {
+    background-color: rgba(0, 255, 102, 0.2);
+  }
+
+  .trash {
+    cursor: pointer;
+    color: #00ff66;
+    font-size: 1rem;
+  }
+
+  .trash:hover {
+    color: #ff4444;
+  }
+
+  .status {
+    font-size: 1.2rem;
+    color: #00aa44;
+    margin-top: 10px;
+  }
+
+  .filename-input {
+    width: 100%;
+    background: #000;
+    color: #00ff66;
+    border: 1px solid #00ff66;
+    padding: 6px;
+    margin-bottom: 10px;
+    font-family: inherit;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #00ff66;
+  }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <h1>Times</h1>
+  <input type="text" id="filenameInput" class="filename-input" placeholder="Filename (e.g. times.csv)">
+  <div id="timeList"></div>
+  <button class="export-btn" id="exportBtn">Export CSV</button>
+  <button class="load-btn" id="loadBtn">Load CSV</button>
+  <input type="file" id="fileInput" accept=".csv" style="display:none">
+</div>
+
+<div class="timer-area">
+  <div class="time-display" id="timeDisplay">00.000</div>
+  <div class="status" id="statusText">Hold SPACE to get ready</div>
+</div>
+
+<script>
+  let startTime = 0;
+  let timerRunning = false;
+  let ready = false;
+  let times = []; // { timestamp, time }
+  let timerInterval = null;
+  let selectedIndex = -1;
+  let filename = "times.csv";
+
+  const display = document.getElementById('timeDisplay');
+  const list = document.getElementById('timeList');
+  const statusText = document.getElementById('statusText');
+  const exportBtn = document.getElementById('exportBtn');
+  const loadBtn = document.getElementById('loadBtn');
+  const fileInput = document.getElementById('fileInput');
+  const filenameInput = document.getElementById('filenameInput');
+
+  // ---- Autosave / Load Session ----
+  window.addEventListener('load', () => {
+    const savedData = localStorage.getItem('matrixTimerData');
+    if (savedData) {
+      const choice = confirm("Continue previous session?");
+      if (choice) {
+        const parsed = JSON.parse(savedData);
+        times = parsed.times || [];
+        filename = parsed.filename || "times.csv";
+        filenameInput.value = filename;
+        renderList();
+      } else {
+        localStorage.removeItem('matrixTimerData');
+      }
+    }
+  });
+
+  window.addEventListener('beforeunload', () => {
+    localStorage.setItem('matrixTimerData', JSON.stringify({ times, filename }));
+  });
+
+  // ---- Keyboard Controls ----
+  document.body.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+
+      // Stop on press
+      if (timerRunning) {
+        stopTimer();
+        return;
+      }
+
+      // Ready on press
+      if (!timerRunning && !ready) {
+        ready = true;
+        statusText.textContent = "Release SPACE to start";
+        display.style.color = "#00aa44";
+      }
+    } else if (e.code === 'ArrowUp') {
+      e.preventDefault();
+      if (times.length === 0) return;
+      selectedIndex = Math.max(0, selectedIndex - 1);
+      highlightSelection();
+    } else if (e.code === 'ArrowDown') {
+      e.preventDefault();
+      if (times.length === 0) return;
+      selectedIndex = Math.min(times.length - 1, selectedIndex + 1);
+      highlightSelection();
+    } else if (e.code === 'Delete') {
+      e.preventDefault();
+      if (selectedIndex >= 0 && selectedIndex < times.length) {
+        deleteTime(selectedIndex);
+        if (selectedIndex >= times.length) selectedIndex = times.length - 1;
+        highlightSelection();
+      }
+    }
+  });
+
+  document.body.addEventListener('keyup', (e) => {
+    if (e.code !== 'Space') return;
+    e.preventDefault();
+    if (ready && !timerRunning) startTimer();
+  });
+
+  // ---- Core Functions ----
+  function startTimer() {
+    ready = false;
+    timerRunning = true;
+    startTime = performance.now();
+    statusText.textContent = "Timing...";
+    display.style.color = "#00ff66";
+    timerInterval = setInterval(updateTimer, 10);
+  }
+
+  function stopTimer() {
+    timerRunning = false;
+    clearInterval(timerInterval);
+    const endTime = performance.now();
+    const elapsed = (endTime - startTime) / 1000;
+    display.textContent = elapsed.toFixed(3);
+    statusText.textContent = "Hold SPACE to get ready";
+    display.style.color = "#00ff66";
+    addTime(elapsed.toFixed(3));
+  }
+
+  function updateTimer() {
+    const current = (performance.now() - startTime) / 1000;
+    display.textContent = current.toFixed(3);
+  }
+
+  function addTime(timeStr) {
+    const timestamp = new Date().toLocaleString();
+    times.push({ timestamp, time: timeStr });
+    renderList();
+  }
+
+  function deleteTime(index) {
+    times.splice(index, 1);
+    renderList();
+  }
+
+  function renderList() {
+    list.innerHTML = "";
+    times.forEach((t, i) => {
+      const div = document.createElement("div");
+      div.className = "entry" + (i === selectedIndex ? " highlighted" : "");
+      div.innerHTML = `
+        <span>${t.timestamp} — ${t.time}s</span>
+        <span class="trash" onclick="deleteTime(${i})">🗑️</span>
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  function highlightSelection() {
+    const entries = document.querySelectorAll(".entry");
+    entries.forEach((el, i) => {
+      el.classList.toggle("highlighted", i === selectedIndex);
+    });
+  }
+
+  // ---- Export & Load CSV ----
+  function exportCSV() {
+    if (times.length === 0) return alert("No data to export.");
+    const chosenFilename = filenameInput.value.trim() || "times.csv";
+    filename = chosenFilename;
+    let csvContent = "data:text/csv;charset=utf-8,Timestamp,Time (s)\n";
+    csvContent += times.map(t => `"${t.timestamp}",${t.time}`).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", chosenFilename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  // ✅ FIXED loadCSV FUNCTION
+  function loadCSV(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const lines = e.target.result.split(/\r?\n/).slice(1); // skip header
+      times = lines
+        .filter(line => line.trim().length > 0)
+        .map(line => {
+          // Handle commas and quotes properly
+          const match = line.match(/"?(.*?)"?,\s*"?([\d.]+)"?$/);
+          if (!match) return null;
+          const timestamp = match[1];
+          const time = match[2];
+          return { timestamp, time };
+        })
+        .filter(Boolean);
+      renderList();
+    };
+    reader.readAsText(file);
+  }
+
+  // ---- UI Events ----
+  exportBtn.addEventListener('click', exportCSV);
+  loadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) loadCSV(file);
+  });
+
+  window.deleteTime = deleteTime; // expose for inline onclick
+</script>
+
+</body>
+</html>
