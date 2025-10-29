@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screenplay CSV Tool</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: monospace;
+      background-color: #000;
+      color: #00FF00;
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #sidebar {
+      width: 250px;
+      background: #111;
+      padding: 20px;
+      box-sizing: border-box;
+      transition: width 0.3s ease;
+      overflow-y: auto;
+    }
+    #sidebar.hidden {
+      width: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    #sidebar button {
+      display: block;
+      width: 100%;
+      margin: 6px 0;
+      padding: 10px;
+      background: #111;
+      color: #00FF00;
+      border: 1px solid #00FF00;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #sidebar button:hover {
+      background: #222;
+    }
+    #hamburger {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      font-size: 24px;
+      cursor: pointer;
+      color: #00FF00;
+      background: #111;
+      padding: 8px 12px;
+      border-radius: 6px;
+      z-index: 1000;
+      border: 1px solid #00FF00;
+    }
+    #right-panel {
+      flex: 1;
+      padding: 20px;
+      overflow-x: auto;
+      background: #000;
+      margin-top: 50px;
+      transition: all 0.3s ease;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      color: #00FF00;
+    }
+    th, td {
+      border: 1px solid #00FF00;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+      background: #111;
+      color: #00FF00;
+    }
+    th {
+      background: #111;
+    }
+    td textarea {
+      width: 100%;
+      background: #111;
+      color: #00FF00;
+      border: 1px solid #00FF00;
+      border-radius: 4px;
+      padding: 6px;
+      resize: vertical;
+      min-height: 40px;
+      font-family: monospace;
+    }
+    .delete-btn {
+      color: #FF5555;
+      cursor: pointer;
+      font-weight: bold;
+      margin-left: 8px;
+    }
+    .drag-handle {
+      cursor: grab;
+      margin-left: 8px;
+      color: #00FF00;
+      font-weight: bold;
+      user-select: none;
+    }
+    .drag-handle:active {
+      cursor: grabbing;
+    }
+    #controls {
+      margin-top: 15px;
+    }
+    #filename {
+      width: calc(100% - 20px);
+      margin-bottom: 10px;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #00FF00;
+      background: #111;
+      color: #00FF00;
+      font-family: monospace;
+    }
+    #controls button {
+      margin: 5px 0;
+      width: 100%;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #00FF00;
+      background: #111;
+      color: #00FF00;
+      cursor: pointer;
+    }
+    #controls button:hover {
+      background: #222;
+    }
+    tr.dragging {
+      opacity: 0.5;
+    }
+    .scene-row td {
+      background: #002222;
+      color: #00FF00;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .scene-row.collapsed td {
+      background: #220000;
+      color: #00FF00;
+    }
+    .scene-indicator {
+      margin-right: 6px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="hamburger" onclick="toggleSidebar()">☰</div>
+
+  <div id="sidebar">
+    <button onclick="addRow('Top Info')">Top Info</button>
+    <button onclick="addRow('Bottom Info')">Bottom Info</button>
+    <button onclick="addRow('Title')">Title</button>
+    <button onclick="addRow('Titletop')">Titletop</button>
+    <button onclick="addRow('Titlebottom')">Titlebottom</button>
+    <button onclick="addRow('Scene')">Scene</button>
+    <button onclick="addRow('Action')">Action</button>
+    <button onclick="addRow('Character')">Character</button>
+    <button onclick="addRow('parenthetical')">Parenthetical</button>
+    <button onclick="addRow('Dialogue')">Dialogue</button>
+    <button id="toggleCollapseBtn" onclick="toggleAllScenes()">Collapse All Scenes</button>
+    <div id="controls">
+      <input type="text" id="filename" placeholder="Enter filename...">
+      <button id="exportBtn">Export CSV</button>
+      <input type="file" id="importFile" accept=".csv">
+    </div>
+  </div>
+
+  <div id="right-panel">
+    <table id="screenplayTable">
+      <thead>
+        <tr><th>Element</th><th>Content</th><th>Delete</th><th>Drag</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    const tbody = document.querySelector("#screenplayTable tbody");
+    let activeRow = null;
+    let draggedRow = null;
+
+    // --- AUTOSAVE SYSTEM ---
+    const STORAGE_KEY = "screenplay_autosave";
+
+    function saveToLocal() {
+      const rows = Array.from(tbody.querySelectorAll("tr")).map(row => {
+        const element = row.querySelector("td:first-child").textContent.replace(/▼|▶/g, '').trim();
+        const content = row.querySelector("textarea")?.value || "";
+        const collapsed = row.classList.contains("collapsed");
+        return { element, content, collapsed };
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(rows));
+    }
+
+    function loadFromLocal() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (!saved) return;
+      const rows = JSON.parse(saved);
+      tbody.innerHTML = "";
+      rows.forEach(r => {
+        addRow(r.element);
+        const last = tbody.lastChild;
+        last.querySelector("textarea").value = r.content;
+        if (r.collapsed && last.classList.contains("scene-row")) {
+          toggleSceneCollapse(last);
+        }
+      });
+      updateCollapseButton();
+    }
+
+    // --- CONTINUE OR START FRESH POPUP ---
+    window.addEventListener("load", () => {
+      if (localStorage.getItem(STORAGE_KEY)) {
+        const resume = confirm("Would you like to continue where you left off?");
+        if (resume) {
+          loadFromLocal();
+        } else {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      }
+    });
+
+    // --- AUTOSAVE ON CHANGE ---
+    const observer = new MutationObserver(saveToLocal);
+    observer.observe(tbody, { childList: true, subtree: true });
+
+    tbody.addEventListener("input", saveToLocal);
+
+    tbody.addEventListener("focusin", (e) => {
+      if (e.target.tagName === "TEXTAREA") {
+        activeRow = e.target.closest("tr");
+      }
+    });
+
+    function addRow(element) {
+      const row = document.createElement("tr");
+      row.draggable = false;
+
+      if (element.toLowerCase() === 'scene') {
+        row.classList.add('scene-row');
+        row.innerHTML = `
+          <td><span class="scene-indicator">▼</span>${element}</td>
+          <td><textarea></textarea></td>
+          <td><span class="delete-btn" onclick="this.closest('tr').remove(); saveToLocal();">x</span></td>
+          <td><span class="drag-handle">⇅</span></td>
+        `;
+        row.addEventListener("click", (e) => {
+          if (!['TEXTAREA', 'SPAN'].includes(e.target.tagName) || e.target.classList.contains('scene-indicator')) {
+            toggleSceneCollapse(row);
+            updateCollapseButton();
+            saveToLocal();
+          }
+        });
+      } else {
+        row.innerHTML = `
+          <td>${element}</td>
+          <td><textarea></textarea></td>
+          <td><span class="delete-btn" onclick="this.closest('tr').remove(); saveToLocal();">x</span></td>
+          <td><span class="drag-handle">⇅</span></td>
+        `;
+      }
+
+      addDragAndDropHandlers(row);
+
+      if (activeRow && activeRow.parentNode === tbody) {
+        tbody.insertBefore(row, activeRow.nextSibling);
+      } else {
+        tbody.appendChild(row);
+      }
+
+      const textarea = row.querySelector("textarea");
+      textarea.focus();
+      textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      saveToLocal();
+    }
+
+    function toggleSceneCollapse(sceneRow) {
+      const isCollapsed = sceneRow.classList.toggle('collapsed');
+      const indicator = sceneRow.querySelector('.scene-indicator');
+      if (indicator) indicator.textContent = isCollapsed ? '▶' : '▼';
+
+      let next = sceneRow.nextElementSibling;
+      while (next && !next.classList.contains('scene-row')) {
+        next.style.display = isCollapsed ? 'none' : '';
+        next = next.nextElementSibling;
+      }
+    }
+
+    function toggleAllScenes() {
+      const scenes = document.querySelectorAll('.scene-row');
+      if (!scenes.length) return;
+      const allCollapsed = Array.from(scenes).every(r => r.classList.contains('collapsed'));
+
+      if (allCollapsed) {
+        scenes.forEach(sceneRow => {
+          if (sceneRow.classList.contains('collapsed')) toggleSceneCollapse(sceneRow);
+        });
+      } else {
+        scenes.forEach(sceneRow => {
+          if (!sceneRow.classList.contains('collapsed')) toggleSceneCollapse(sceneRow);
+        });
+      }
+      updateCollapseButton();
+      saveToLocal();
+    }
+
+    function updateCollapseButton() {
+      const scenes = document.querySelectorAll('.scene-row');
+      const btn = document.getElementById('toggleCollapseBtn');
+      if (!scenes.length) {
+        btn.textContent = "Collapse All Scenes";
+        return;
+      }
+      const allCollapsed = Array.from(scenes).every(r => r.classList.contains('collapsed'));
+      btn.textContent = allCollapsed ? "Expand All Scenes" : "Collapse All Scenes";
+    }
+
+    function addDragAndDropHandlers(row) {
+      const handle = row.querySelector(".drag-handle");
+      function startDrag(e) {
+        draggedRow = row;
+        row.classList.add("dragging");
+        document.addEventListener("mousemove", onMouseMove);
+        document.addEventListener("mouseup", endDrag);
+        document.addEventListener("touchmove", onTouchMove, { passive: false });
+        document.addEventListener("touchend", endDrag);
+        e.preventDefault();
+      }
+      function onMouseMove(e) { handleMove(e.clientY); }
+      function onTouchMove(e) { handleMove(e.touches[0].clientY); e.preventDefault(); }
+      function handleMove(y) {
+        const rows = Array.from(tbody.querySelectorAll("tr:not(.dragging)"));
+        rows.forEach(r => {
+          const rect = r.getBoundingClientRect();
+          const offset = y - rect.top;
+          if (offset > 0 && offset < rect.height) {
+            if (offset < rect.height / 2) tbody.insertBefore(draggedRow, r);
+            else tbody.insertBefore(draggedRow, r.nextSibling);
+          }
+        });
+      }
+      function endDrag() {
+        if (!draggedRow) return;
+        draggedRow.classList.remove("dragging");
+        draggedRow = null;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", endDrag);
+        document.removeEventListener("touchmove", onTouchMove);
+        document.removeEventListener("touchend", endDrag);
+        saveToLocal();
+      }
+      handle.addEventListener("mousedown", startDrag);
+      handle.addEventListener("touchstart", startDrag, { passive: false });
+    }
+
+    document.getElementById('exportBtn').addEventListener('click', () => {
+      let csv = "Element,Content\n";
+      tbody.querySelectorAll("tr").forEach(row => {
+        const cells = row.querySelectorAll("td");
+        const element = cells[0].textContent.replace(/▼|▶/g, '').trim();
+        const content = cells[1].querySelector("textarea").value.replace(/"/g, '""');
+        csv += `"${element}","${content}"\n`;
+      });
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = document.getElementById("filename").value || "screenplay.csv";
+      link.click();
+    });
+
+    document.getElementById('importFile').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const rows = parseCSV(event.target.result);
+        tbody.innerHTML = '';
+        rows.slice(1).forEach(r => {
+          if (r.length < 2) return;
+          addRow(r[0].trim());
+          tbody.lastChild.querySelector("textarea").value = r[1].trim();
+        });
+        updateCollapseButton();
+        saveToLocal();
+      };
+      reader.readAsText(file);
+    });
+
+    function parseCSV(text) {
+      const rows = [];
+      let curRow = [], curVal = '', inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i], nextChar = text[i + 1];
+        if (char == '"' && inQuotes && nextChar == '"') { curVal += '"'; i++; }
+        else if (char == '"') inQuotes = !inQuotes;
+        else if (char == ',' && !inQuotes) { curRow.push(curVal); curVal = ''; }
+        else if ((char == '\n' || char == '\r') && !inQuotes) {
+          if (curVal || curRow.length > 0) { curRow.push(curVal); rows.push(curRow); curRow = []; curVal = ''; }
+          if (char == '\r' && nextChar == '\n') i++;
+        } else curVal += char;
+      }
+      if (curVal || curRow.length > 0) curRow.push(curVal);
+      if (curRow.length > 0) rows.push(curRow);
+      return rows;
+    }
+
+    function toggleSidebar() {
+      document.getElementById("sidebar").classList.toggle("hidden");
+    }
+  </script>
+</body>
+</html>
