@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Email Template Manager</title>
+  <style>
+    :root{
+      --bg: #f4f6f9;
+      --panel: #ffffff;
+      --muted: #6b7280;
+      --accent: #0f62fe;
+      --text: #0f172a;
+      --shadow: 0 6px 18px rgba(10,20,30,0.08);
+    }
+    .dark{
+      --bg: #222222;
+      --panel: #333333;
+      --muted: #9aa7b2;
+      --accent: #6aa8ff;
+      --text: #e6eef9;
+      --shadow: 0 6px 11px rgba(0,0,0,0.6);
+    }
+    *{box-sizing:border-box}
+    body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; margin:0; background:var(--bg); color:var(--text); transition:background .18s, color .18s}
+    .app{display:grid; grid-template-columns:280px 1fr; min-height:100vh; gap:18px; padding:18px}
+    header{grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:12px}
+    .brand{display:flex; align-items:center; gap:12px}
+    .logo{width:44px;height:44px;border-radius:8px;background:linear-gradient(0deg,var(--accent),#8bd4ff);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;box-shadow:var(--shadow)}
+    .controls{display:flex;gap:8px;align-items:center}
+    button{background:var(--panel);border:1px solid rgba(0,0,0,0.06);padding:8px 10px;border-radius:8px;cursor:pointer;box-shadow:var(--shadow);color: var(--text);}
+    .dark button{border:1px solid rgba(255,255,255,0.04)}
+    .sidebar{background:var(--panel);border-radius:12px;padding:12px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:8px}
+    .sidebar-top{display:flex;gap:8px;margin-bottom:6px}
+    .sidebar-list{overflow:auto;padding-right:6px}
+    .template-btn{display:flex;align-items:center;justify-content:space-between;padding:10px;border-radius:8px;border:1px dashed transparent;cursor:pointer}
+    .template-btn.selected{background:linear-gradient(90deg, rgba(15,98,254,0.06), rgba(106,168,255,0.02));border-color:rgba(15,98,254,0.12)}
+    .main{background:var(--panel);border-radius:12px;padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:12px}
+    .title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .title-left{display:flex;align-items:center;gap:12px}
+    .title{font-size:18px;font-weight:700}
+    .meta-actions{display:flex;gap:8px}
+    .subject{font-weight:600}
+    .body-view{background:rgba(0,0,0,0.02);padding:12px;border-radius:8px;min-height:220px;overflow:auto}
+    .small{font-size:13px;color:var(--muted)}
+    .muted{color:var(--muted)}
+    .columns{display:flex;gap:12px}
+    .col{flex:1;display:flex;flex-direction:column;gap:8px}
+    /* modal */
+    .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center}
+    .modal{width:720px;max-width:92%;background:var(--panel);padding:16px;border-radius:12px;box-shadow:var(--shadow)}
+    input,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(0,0,0,0.06);background:transparent;color:inherit}
+    label{font-size:13px;font-weight:600}
+    .row{display:flex;gap:8px}
+    .flex{flex:1}
+    .drag-handle{cursor:grab;padding:6px 8px;border-radius:6px}
+    .actions{display:flex;gap:8px;justify-content:flex-end}
+    @media(max-width:880px){.app{grid-template-columns:1fr;}.sidebar{order:2}.main{order:1}}
+  </style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <div class="brand">
+        <div class="logo">ET</div>
+        <div>
+          <div style="font-weight:700">Email Template Manager</div>
+          <div class="small muted">standalone — save, load, copy (HTML preserved)</div>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="addBtn">➕ Add New Template</button>
+        <button id="saveBtn">💾 Save Templates</button>
+        <button id="importBtn">📂 Load Templates</button>
+        <button id="toggleTheme">🌓 Toggle Dark Mode</button>
+        <input type="file" id="fileInput" style="display:none" accept="application/json" />
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <input id="search" placeholder="Search templates..." style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(0,0,0,0.06)" />
+        <button id="reorderBtn" title="Toggle reorder">☰</button>
+      </div>
+      <div class="sidebar-list" id="list"></div>
+      <div style="margin-top:auto;display:flex;gap:8px;align-items:center;justify-content:center;padding-top:8px">
+        <button id="clearBtn" style="background:transparent;border:1px solid rgba(0,0,0,0.06);">Clear All</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="title-row">
+        <div class="title-left">
+          <div class="title" id="tplTitle">(no template selected)</div>
+          <div class="meta-actions" id="metaActionsTitle">
+            <!-- duplicate copy buttons by the title -->
+            <button id="copySubjectTitle" title="Copy subject">Copy Subject</button>
+            <button id="copyBodyTitle" title="Copy body">Copy Email</button>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="editBtn">Edit</button>
+          <button id="deleteBtn">Delete</button>
+        </div>
+      </div>
+
+      <div class="columns">
+        <div class="col">
+          <div><label>Subject</label></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div class="flex subject" id="subjectText">—</div>
+            <div style="display:flex;flex-direction:column;gap:6px">
+              <!-- duplicate copy next to subject -->
+              <button id="copySubjectBottom">Copy Subject</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div><label>Email Body</label></div>
+          <div><button id="copyBodyBottom">Copy Email</button></div>
+        </div>
+        <div class="body-view" id="bodyView"><div class="small muted">No template selected</div></div>
+      </div>
+    </main>
+
+    <!-- modal for add/edit -->
+    <div id="modal" style="display:none" role="dialog">
+      <div class="modal-backdrop">
+        <div class="modal" role="document">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="font-weight:700" id="modalTitle">Add Template</div>
+            <button id="closeModal">✖</button>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div>
+              <label>Template Name</label>
+              <input id="inputName" placeholder="E.g. Meeting follow-up" />
+            </div>
+            <div>
+              <label>Subject</label>
+              <input id="inputSubject" placeholder="Email subject" />
+            </div>
+            <div>
+              <label>Body (rich text allowed)</label>
+              <div contenteditable="true" id="inputBody" style="min-height:160px;padding:10px;border-radius:8px;border:1px solid rgba(0,0,0,0.06);background:transparent"></div>
+              <div class="small muted">You can paste formatted HTML or type. Use toolbar shortcuts (Ctrl/Cmd+B) for bold, etc.</div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px">
+              <button id="saveTemplateBtn">Save</button>
+              <button id="cancelTemplateBtn">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // Basic app state
+    let templates = [];
+    let selectedIndex = -1;
+    let reorderMode = false;
+
+    const listEl = document.getElementById('list');
+    const tplTitle = document.getElementById('tplTitle');
+    const subjectText = document.getElementById('subjectText');
+    const bodyView = document.getElementById('bodyView');
+    const modal = document.getElementById('modal');
+    const inputName = document.getElementById('inputName');
+    const inputSubject = document.getElementById('inputSubject');
+    const inputBody = document.getElementById('inputBody');
+    const modalTitle = document.getElementById('modalTitle');
+
+    // init
+    function init(){
+      loadTheme();
+      bindUI();
+      loadFromLocalIfPrompted();
+      renderList();
+      renderSelected();
+    }
+
+    function bindUI(){
+      document.getElementById('addBtn').addEventListener('click',()=>openModal());
+      document.getElementById('saveBtn').addEventListener('click',saveToFile);
+      document.getElementById('importBtn').addEventListener('click',()=>document.getElementById('fileInput').click());
+      document.getElementById('fileInput').addEventListener('change',handleFileImport);
+      document.getElementById('toggleTheme').addEventListener('click',toggleTheme);
+      document.getElementById('closeModal').addEventListener('click',closeModal);
+      document.getElementById('cancelTemplateBtn').addEventListener('click',closeModal);
+      document.getElementById('saveTemplateBtn').addEventListener('click',saveTemplateFromModal);
+      document.getElementById('editBtn').addEventListener('click',()=>{ if(selectedIndex>=0) openModal(templates[selectedIndex], selectedIndex); });
+      document.getElementById('deleteBtn').addEventListener('click',deleteSelected);
+      document.getElementById('clearBtn').addEventListener('click',clearAll);
+      document.getElementById('search').addEventListener('input',renderList);
+      document.getElementById('reorderBtn').addEventListener('click',toggleReorder);
+
+      // copy buttons
+      document.getElementById('copySubjectTitle').addEventListener('click',()=>copySubject());
+      document.getElementById('copyBodyTitle').addEventListener('click',()=>copyBody());
+      document.getElementById('copySubjectBottom').addEventListener('click',()=>copySubject());
+      document.getElementById('copyBodyBottom').addEventListener('click',()=>copyBody());
+    }
+
+    /* rendering */
+    function renderList(){
+      const q = document.getElementById('search').value.toLowerCase().trim();
+      listEl.innerHTML = '';
+      templates.forEach((t,i)=>{
+        if(q && !(t.name||'').toLowerCase().includes(q) && !(t.subject||'').toLowerCase().includes(q)) return;
+        const btn = document.createElement('div');
+        btn.className = 'template-btn' + (i===selectedIndex? ' selected':'');
+        btn.setAttribute('draggable', reorderMode);
+        btn.innerHTML = `<div style="display:flex;gap:8px;align-items:center"><div class="drag-handle">☰</div><div><div style='font-weight:700'>${escapeHtml(t.name||'Untitled')}</div><div class='small muted'>${escapeHtml(t.subject||'')}</div></div></div><div style='display:flex;gap:6px;align-items:center'><button data-i='${i}' class='quick-subj' title='Copy subject'>S</button><button data-i='${i}' class='quick-body' title='Copy email'>E</button></div>`;
+        // click selects
+        btn.addEventListener('click',(ev)=>{
+          // prevent clicks from quick buttons bubbling
+          if(ev.target && (ev.target.classList.contains('quick-subj') || ev.target.classList.contains('quick-body'))) return;
+          selectIndex(i);
+        });
+        // quick buttons
+        btn.querySelectorAll('.quick-subj').forEach(b=>b.addEventListener('click', (ev)=>{ ev.stopPropagation(); copySubject(i); }));
+        btn.querySelectorAll('.quick-body').forEach(b=>b.addEventListener('click', (ev)=>{ ev.stopPropagation(); copyBody(i); }));
+
+        // drag
+        btn.addEventListener('dragstart', (e)=>{
+          e.dataTransfer.setData('text/plain', i);
+        });
+        btn.addEventListener('dragover', (e)=>{ e.preventDefault(); });
+        btn.addEventListener('drop', (e)=>{
+          e.preventDefault();
+          const from = Number(e.dataTransfer.getData('text/plain'));
+          const to = i;
+          reorderTemplates(from,to);
+        });
+
+        listEl.appendChild(btn);
+      });
+    }
+
+    function renderSelected(){
+      if(selectedIndex<0 || selectedIndex>=templates.length){
+        tplTitle.textContent = '(no template selected)';
+        subjectText.textContent = '—';
+        bodyView.innerHTML = '<div class="small muted">No template selected</div>';
+        return;
+      }
+      const t = templates[selectedIndex];
+      tplTitle.textContent = t.name || '(untitled)';
+      subjectText.textContent = t.subject || '';
+      bodyView.innerHTML = t.body || '';
+      saveToLocal();
+    }
+
+    function selectIndex(i){ selectedIndex = i; renderList(); renderSelected(); }
+
+    function openModal(data=null, idx=null){
+      modal.style.display = 'block';
+      modalTitle.textContent = data? 'Edit Template': 'Add Template';
+      inputName.value = data? data.name : '';
+      inputSubject.value = data? data.subject : '';
+      inputBody.innerHTML = data? data.body : '';
+      inputBody.focus();
+      // store index on save button
+      document.getElementById('saveTemplateBtn').dataset.idx = (idx!=null)? idx : '';
+    }
+    function closeModal(){ modal.style.display = 'none'; }
+
+    function saveTemplateFromModal(){
+      const name = inputName.value.trim() || 'Untitled';
+      const subject = inputSubject.value.trim();
+      const body = inputBody.innerHTML.trim();
+      const idx = document.getElementById('saveTemplateBtn').dataset.idx;
+      const obj = {name, subject, body};
+      if(idx!==undefined && idx!==''){
+        templates[idx] = obj;
+        selectedIndex = Number(idx);
+      } else {
+        templates.push(obj);
+        selectedIndex = templates.length-1;
+      }
+      closeModal();
+      renderList(); renderSelected();
+    }
+
+    function deleteSelected(){
+      if(selectedIndex<0) return alert('No template selected');
+      if(!confirm('Delete this template?')) return;
+      templates.splice(selectedIndex,1);
+      selectedIndex = Math.max(0, selectedIndex-1);
+      renderList(); renderSelected();
+    }
+
+    function clearAll(){
+      if(!confirm('Clear all templates? This cannot be undone.')) return;
+      templates = [];
+      selectedIndex = -1;
+      saveToLocal();
+      renderList(); renderSelected();
+    }
+
+    /* save/load to file */
+    function saveToFile(){
+      const name = prompt('Enter a file name for saving templates', 'my-email-templates');
+      if(!name) return;
+      const blob = new Blob([JSON.stringify(templates, null, 2)], {type:'application/json'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name.replace(/[^a-z0-9-_]/gi,'_') + '.json';
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+
+    function handleFileImport(ev){
+      const f = ev.target.files[0];
+      if(!f) return;
+      const reader = new FileReader();
+      reader.onload = ()=>{
+        try{
+          const json = JSON.parse(reader.result);
+          if(!Array.isArray(json)) throw new Error('Invalid format');
+          if(!confirm('Loading this file will replace your current templates. Continue?')) return;
+          templates = json.map(x=>({name:x.name||'Untitled', subject:x.subject||'', body:x.body||''}));
+          selectedIndex = templates.length?0:-1;
+          renderList(); renderSelected();
+        }catch(err){ alert('Failed to import: ' + err.message); }
+      };
+      reader.readAsText(f);
+      ev.target.value = '';
+    }
+
+    /* localStorage persistence */
+    function saveToLocal(){
+      try{ localStorage.setItem('email_templates_v1', JSON.stringify(templates)); localStorage.setItem('email_templates_theme', document.body.classList.contains('dark')? 'dark':'light'); }catch(e){}
+    }
+    function loadFromLocalIfPrompted(){
+      try{
+        const raw = localStorage.getItem('email_templates_v1');
+        if(raw){
+          const ok = confirm('Do you want to load your previous session?');
+          if(ok){
+            templates = JSON.parse(raw) || [];
+            selectedIndex = templates.length?0:-1;
+          }
+        }
+      }catch(e){ console.warn(e); }
+    }
+
+    /* theme */
+    function toggleTheme(){ document.body.classList.toggle('dark'); saveToLocal(); }
+    function loadTheme(){ const t = localStorage.getItem('email_templates_theme'); if(t==='dark') document.body.classList.add('dark'); }
+
+    /* copy helpers */
+    async function copySubject(indexOverride=null){
+      const i = (indexOverride!=null)? indexOverride : selectedIndex;
+      if(i<0 || i>=templates.length){ return alert('No subject to copy'); }
+      const text = templates[i].subject || '';
+      try{ await navigator.clipboard.writeText(text); alert('Subject copied'); }catch(e){ fallbackPlain(text); }
+    }
+
+    async function copyBody(indexOverride=null){
+      const i = (indexOverride!=null)? indexOverride : selectedIndex;
+      if(i<0 || i>=templates.length){ return alert('No body to copy'); }
+      const html = templates[i].body || '';
+      const plain = stripHtml(html);
+      // try clipboard with html
+      try{
+        if(navigator.clipboard && navigator.clipboard.write){
+          const blobHtml = new Blob([html], {type:'text/html'});
+          const blobPlain = new Blob([plain], {type:'text/plain'});
+          const item = new ClipboardItem({ 'text/html': blobHtml, 'text/plain': blobPlain });
+          await navigator.clipboard.write([item]);
+          alert('Email (rich text) copied to clipboard');
+        } else {
+          // fallback to text only
+          await navigator.clipboard.writeText(plain);
+          alert('Email copied (plain text only)');
+        }
+      }catch(err){
+        console.warn(err); try{ await navigator.clipboard.writeText(plain); alert('Email copied (plain text only)'); }catch(e){ fallbackPlain(plain); }
+      }
+    }
+
+    function fallbackPlain(text){
+      // fallback prompt
+      prompt('Copy this text (Ctrl/Cmd+C):', text);
+    }
+
+    function stripHtml(html){
+      const tmp = document.createElement('div'); tmp.innerHTML = html; return tmp.innerText || tmp.textContent || '';
+    }
+
+    function escapeHtml(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+    /* reorder */
+    function toggleReorder(){ reorderMode = !reorderMode; alert(reorderMode? 'Reorder mode ON — drag sidebar items':'Reorder mode OFF'); renderList(); }
+    function reorderTemplates(from,to){
+      if(from===to) return;
+      const item = templates.splice(from,1)[0];
+      templates.splice(to,0,item);
+      selectedIndex = templates.indexOf(item);
+      renderList(); renderSelected();
+    }
+
+    // util: open modal on double-click empty area to help mobile users
+    document.addEventListener('keydown', (e)=>{ if(e.key==='n' && (e.ctrlKey||e.metaKey)){ e.preventDefault(); openModal(); } });
+
+    // initial sample template
+    templates.push({name:'Meeting Follow-up', subject:'Following up on our meeting', body:'<p>Hi [Name],</p><p>Thanks for meeting earlier. As discussed, please find the next steps below:</p><ul><li>Action 1</li><li>Action 2</li></ul><p>Regards,<br>Elliot</p>'});
+
+    // start
+    init();
+
+  </script>
+</body>
+</html>
