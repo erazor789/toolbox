@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sudoku Game</title>
+<style>
+body {
+    font-family: sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 10px;
+    background: #f4f4f4;
+}
+h1 { margin-bottom: 10px; text-align:center;}
+#info {
+    margin-bottom: 10px;
+    text-align:center;
+}
+#sudoku {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 0;
+    width: 95vw;
+    max-width: 500px;
+    aspect-ratio: 1 / 1;
+    border: 3px solid #000;
+}
+.cell {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: 1 / 1;
+    text-align: center;
+    font-size: calc(2vmin + 2vh);
+    border: 1px solid #999;
+    background: #fff;
+    box-sizing: border-box;
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    user-select: none;
+}
+.cell.fixed { background: #eee; font-weight: bold; cursor: pointer; }
+.cell.wrong { background: #f99; }
+.cell.highlight { background: #fffa90; }
+
+/* Thicker 3x3 borders */
+.cell:nth-child(3n) { border-right: 3px solid #000; }
+.cell:nth-child(n+19):nth-child(-n+27),
+.cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 3px solid #000; }
+
+#controls {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+#controls button {
+    flex: 1 1 40%;
+    margin: 5px;
+    padding: 10px 0;
+    font-size: 1em;
+}
+
+#numberPalette {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 10px;
+}
+#numberPalette button {
+    flex: 1 1 30%;
+    margin: 3px;
+    padding: 10px 0;
+    font-size: 1.2em;
+    cursor: pointer;
+}
+#numberPalette button.active { background: #fffa90; }
+#numberPalette button.disabled { background: #ccc; cursor: default; }
+
+@media(max-width:600px){
+    .cell { font-size: calc(4vw + 4vh); }
+}
+</style>
+</head>
+<body>
+
+<h1>Sudoku</h1>
+<div id="info">
+    <span>Time: <span id="time">00:00</span></span> |
+    <span>Best: <span id="bestTime">--:--</span></span>
+</div>
+<div id="sudoku"></div>
+<div id="controls">
+    <button onclick="checkBoard()">Check</button>
+    <button onclick="resetBoard()">Reset</button>
+</div>
+<div id="numberPalette"></div>
+
+<script>
+// Sudoku Generator
+let solution = [];
+let puzzle = [];
+let timer = null;
+let startTime = null;
+let selectedNumber = null;
+
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random()*(i+1));
+        [array[i],array[j]]=[array[j],array[i]];
+    }
+    return array;
+}
+
+function isSafe(board,row,col,num){
+    for(let x=0;x<9;x++)
+        if(board[row][x]===num||board[x][col]===num) return false;
+    const startRow=row-row%3, startCol=col-col%3;
+    for(let r=0;r<3;r++) for(let c=0;c<3;c++)
+        if(board[startRow+r][startCol+c]===num) return false;
+    return true;
+}
+
+function solve(board){
+    for(let row=0;row<9;row++){
+        for(let col=0;col<9;col++){
+            if(board[row][col]===0){
+                for(let num=1;num<=9;num++){
+                    if(isSafe(board,row,col,num)){
+                        board[row][col]=num;
+                        if(solve(board)) return true;
+                        board[row][col]=0;
+                    }
+                }
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+function generateFullBoard(){
+    let board=Array.from({length:9},()=>Array(9).fill(0));
+    function fillRandomly(board){
+        for(let i=0;i<81;i++){
+            let r=Math.floor(i/9), c=i%9;
+            if(board[r][c]===0){
+                let nums=shuffle([1,2,3,4,5,6,7,8,9]);
+                for(let num of nums){
+                    if(isSafe(board,r,c,num)){
+                        board[r][c]=num;
+                        if(fillRandomly(board)) return true;
+                        board[r][c]=0;
+                    }
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+    fillRandomly(board);
+    return board;
+}
+
+function generatePuzzle(fullBoard,removeCount=40){
+    let puzzle=fullBoard.map(row=>row.slice());
+    let attempts=removeCount;
+    while(attempts>0){
+        let r=Math.floor(Math.random()*9);
+        let c=Math.floor(Math.random()*9);
+        if(puzzle[r][c]!==0){
+            let backup=puzzle[r][c];
+            puzzle[r][c]=0;
+            let copy=puzzle.map(row=>row.slice());
+            if(!hasUniqueSolution(copy)) puzzle[r][c]=backup;
+            else attempts--;
+        }
+    }
+    return puzzle;
+}
+
+function hasUniqueSolution(board){
+    let solutions=0;
+    function solver(b){
+        for(let row=0;row<9;row++){
+            for(let col=0;col<9;col++){
+                if(b[row][col]===0){
+                    for(let num=1;num<=9;num++){
+                        if(isSafe(b,row,col,num)){
+                            b[row][col]=num;
+                            solver(b);
+                            b[row][col]=0;
+                        }
+                    }
+                    return;
+                }
+            }
+        }
+        solutions++;
+        if(solutions>1) return;
+    }
+    solver(board);
+    return solutions===1;
+}
+
+// Timer functions
+function startTimer(){
+    if(timer) return;
+    startTime = Date.now();
+    timer = setInterval(updateTime,1000);
+}
+function updateTime(){
+    const elapsed = Math.floor((Date.now()-startTime)/1000);
+    const min = String(Math.floor(elapsed/60)).padStart(2,'0');
+    const sec = String(elapsed%60).padStart(2,'0');
+    document.getElementById('time').textContent = `${min}:${sec}`;
+}
+function stopTimer(){
+    if(timer) clearInterval(timer);
+    timer=null;
+    const elapsed = Math.floor((Date.now()-startTime)/1000);
+    let best = localStorage.getItem('sudokuBestTime');
+    if(!best || elapsed < best){
+        localStorage.setItem('sudokuBestTime',elapsed);
+        best = elapsed;
+    }
+    const min = String(Math.floor(elapsed/60)).padStart(2,'0');
+    const sec = String(elapsed%60).padStart(2,'0');
+    document.getElementById('time').textContent = `${min}:${sec}`;
+    const bestMin = String(Math.floor(best/60)).padStart(2,'0');
+    const bestSec = String(best%60).padStart(2,'0');
+    document.getElementById('bestTime').textContent = `${bestMin}:${bestSec}`;
+}
+
+// Draw board using divs (no keyboard)
+function drawBoard(board){
+    const container=document.getElementById('sudoku');
+    container.innerHTML='';
+    for(let r=0;r<9;r++){
+        for(let c=0;c<9;c++){
+            const cell=document.createElement('div');
+            cell.className='cell';
+            if(board[r][c]!==0){
+                cell.textContent = board[r][c];
+                cell.dataset.value = board[r][c];
+                cell.classList.add('fixed');
+            } else {
+                cell.dataset.value = '';
+            }
+            cell.addEventListener('click',()=>handleCellClick(cell));
+            container.appendChild(cell);
+        }
+    }
+}
+
+// Number palette
+function createNumberPalette(){
+    const palette=document.getElementById('numberPalette');
+    palette.innerHTML='';
+    for(let n=1;n<=9;n++){
+        const btn=document.createElement('button');
+        btn.textContent=n;
+        btn.id='numBtn'+n;
+        btn.addEventListener('click',()=>{
+            if(btn.classList.contains('disabled')) return;
+            selectedNumber = selectedNumber===n ? null : n;
+            updateNumberPalette();
+            highlightNumbers(selectedNumber);
+        });
+        palette.appendChild(btn);
+    }
+}
+
+function updateNumberPalette(){
+    for(let n=1;n<=9;n++){
+        const btn=document.getElementById('numBtn'+n);
+        const cells=document.querySelectorAll('.cell');
+        let count=0;
+        cells.forEach(cell=>{if(parseInt(cell.dataset.value)===n) count++;});
+        if(count>=9){
+            btn.classList.add('disabled');
+            if(selectedNumber===n) selectedNumber=null;
+        } else btn.classList.remove('disabled');
+        btn.classList.toggle('active',selectedNumber===n);
+    }
+}
+
+// Handle cell clicks
+function handleCellClick(cell){
+    if(cell.classList.contains('fixed')){
+        if(cell.dataset.value!=='') highlightNumbers(parseInt(cell.dataset.value));
+        else highlightNumbers(null);
+        return;
+    }
+    if(selectedNumber){
+        cell.textContent = selectedNumber;
+        cell.dataset.value = selectedNumber;
+        highlightNumbers(selectedNumber);
+        checkCompletion();
+        updateNumberPalette();
+        if(!startTime) startTimer();
+    }
+}
+
+// Highlight numbers
+function highlightNumbers(number){
+    const cells=document.querySelectorAll('.cell');
+    cells.forEach(cell=>{
+        cell.classList.remove('highlight');
+        if(number !== null && number !== '' && parseInt(cell.dataset.value) === number) {
+            cell.classList.add('highlight');
+        }
+    });
+}
+
+// Check board
+function checkBoard(){
+    const cells=document.querySelectorAll('.cell');
+    cells.forEach((cell,i)=>{
+        const r=Math.floor(i/9), c=i%9;
+        cell.classList.remove('wrong');
+        if(cell.dataset.value!=='' && parseInt(cell.dataset.value)!==solution[r][c]) cell.classList.add('wrong');
+    });
+}
+
+// Completion check
+function checkCompletion(){
+    const cells = document.querySelectorAll('.cell');
+    const allFilled = Array.from(cells).every(c => c.dataset.value !== '');
+    if(!allFilled) return;
+    let isCorrect=true;
+    cells.forEach((cell,i)=>{
+        const r=Math.floor(i/9), c=i%9;
+        if(parseInt(cell.dataset.value)!==solution[r][c]) isCorrect=false;
+    });
+    if(isCorrect) stopTimer();
+}
+
+// Reset board
+function resetBoard(){
+    drawBoard(puzzle);
+    clearInterval(timer);
+    timer=null;
+    startTime=null;
+    document.getElementById('time').textContent='00:00';
+    selectedNumber=null;
+    createNumberPalette();
+}
+
+// Initialize game
+solution = generateFullBoard();
+puzzle = generatePuzzle(solution,40);
+drawBoard(puzzle);
+createNumberPalette();
+updateNumberPalette();
+
+</script>
+</body>
+</html>
