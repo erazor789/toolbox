@@ -3,50 +3,45 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Retro Tilt Path Game</title>
+<title>Tilt Path Prototype</title>
 <style>
-html, body {
-  margin:0; padding:0; overflow:hidden; background:black; font-family: monospace;
-}
+html, body { margin:0; padding:0; overflow:hidden; background:black; font-family: monospace; }
 #gameCanvas { display:block; background:black; }
-#counter { position:absolute; top:10px; left:10px; color:#0f0; font-size:1.5em; }
-#debugToggle { position:absolute; top:50px; left:10px; color:#0f0; cursor:pointer; font-size:1em; }
+#debug { position:absolute; top:10px; left:10px; color:#0f0; font-size:1em; }
 #endScreen {
   position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
-  color:#0f0; font-size:2em; text-align:center; display:none;
+  color:#0f0; font-size:1.5em; text-align:center; display:none;
 }
-#endScreen button {
-  margin-top:20px; padding:10px 15px; font-size:1em;
-  border:none; border-radius:5px; background:#0f62fe; color:white; cursor:pointer;
+#endScreen button { margin-top:10px; padding:5px 10px; font-size:1em; }
+#startBtn { 
+  position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  font-size:1.5em; padding:10px 15px;
 }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
-<div id="counter">Mazes Completed: 0</div>
-<div id="debugToggle">Toggle Debug: D</div>
+<div id="debug">Debug info</div>
 <div id="endScreen">
-  <div id="scoreText">Mazes Completed: 0</div>
+  <div>Game Over!</div>
   <button id="restartBtn">Restart</button>
 </div>
+<button id="startBtn">Start Game</button>
 
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-const counter = document.getElementById('counter');
-const debugToggle = document.getElementById('debugToggle');
+const debugDiv = document.getElementById('debug');
 const endScreen = document.getElementById('endScreen');
-const scoreText = document.getElementById('scoreText');
 const restartBtn = document.getElementById('restartBtn');
+const startBtn = document.getElementById('startBtn');
 
-let tiltX=0, tiltY=0;
-let debugMode=false;
-
-const gridSize = 9;
+let tiltX=0, tiltY=0, debugMode=true;
+const gridSize = 5;
 let cellSize, ballSize;
 let ball = {x:0, y:0, vx:0, vy:0};
-let path = [], pathSegments = [];
-let completedMazes = 0;
+let path = [];
+let completed = 0;
 
 // Resize canvas
 function resizeCanvas(){
@@ -58,113 +53,65 @@ function resizeCanvas(){
 resizeCanvas();
 window.addEventListener('resize', resizeCanvas);
 
-// Device tilt
+// Handle tilt
 function handleOrientation(e){
   tiltX = e.gamma/90;
   tiltY = e.beta/90;
 }
-window.addEventListener('deviceorientation', handleOrientation);
 
-// Generate strict horizontal/vertical path
+// Simple straight path
 function generatePath(){
   path = [];
-  let x=0, y=0;
-  path.push({x,y});
-  while(x<gridSize-1 || y<gridSize-1){
-    if(x<gridSize-1 && y<gridSize-1){
-      if(Math.random()<0.5) x++; else y++;
-    } else if(x<gridSize-1){
-      x++;
-    } else {
-      y++;
-    }
-    path.push({x,y});
+  for(let i=0;i<gridSize;i++){
+    path.push({x:i, y:i});
   }
-
-  // Build corridor segments
-  pathSegments = path.map(cell => ({
-    x: cell.x*cellSize,
-    y: cell.y*cellSize,
-    width: cellSize,
-    height: cellSize
-  }));
-
-  // Place ball in first cell
   ball.x = path[0].x*cellSize + cellSize/2;
   ball.y = path[0].y*cellSize + cellSize/2;
   ball.vx = 0; ball.vy = 0;
 }
 
 // Check if ball is on path
-function isOnPath(ball){
-  for(const seg of pathSegments){
-    if(ball.x+ballSize/2 > seg.x &&
-       ball.x-ballSize/2 < seg.x+seg.width &&
-       ball.y+ballSize/2 > seg.y &&
-       ball.y-ballSize/2 < seg.y+seg.height) return true;
+function isOnPath(){
+  for(const cell of path){
+    if(ball.x > cell.x*cellSize && ball.x < (cell.x+1)*cellSize &&
+       ball.y > cell.y*cellSize && ball.y < (cell.y+1)*cellSize)
+       return true;
   }
   return false;
 }
 
-// End game
-function endGame(){
-  endScreen.style.display='block';
-  scoreText.innerText=`Mazes Completed: ${completedMazes}`;
-  ball.vx=0; ball.vy=0;
-}
-
-// Update ball
+// Update
 function update(){
-  ball.vx += tiltX*2.5;
-  ball.vy += tiltY*2.5;
-  const maxSpeed = cellSize*0.3;
-  ball.vx = Math.max(-maxSpeed, Math.min(maxSpeed, ball.vx));
-  ball.vy = Math.max(-maxSpeed, Math.min(maxSpeed, ball.vy));
+  ball.vx += tiltX*2;
+  ball.vy += tiltY*2;
+  ball.vx = Math.max(-cellSize*0.3, Math.min(cellSize*0.3, ball.vx));
+  ball.vy = Math.max(-cellSize*0.3, Math.min(cellSize*0.3, ball.vy));
   ball.x += ball.vx; ball.y += ball.vy;
   ball.vx *= 0.85; ball.vy *= 0.85;
 
-  if(!isOnPath(ball)) endGame();
-
-  const finish = path[path.length-1];
-  const fx = finish.x*cellSize + cellSize/2;
-  const fy = finish.y*cellSize + cellSize/2;
-  const dx = ball.x - fx, dy = ball.y - fy;
-  if(Math.sqrt(dx*dx + dy*dy) < ballSize/2){
-    completedMazes++;
-    counter.innerText = `Mazes Completed: ${completedMazes}`;
-    generatePath();
+  if(!isOnPath()){
+    endScreen.style.display='block';
   }
 }
 
-// Draw game
+// Draw
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-
-  // Draw path corridor
+  // Draw path
   ctx.fillStyle='#0f0';
-  pathSegments.forEach(seg => ctx.fillRect(seg.x, seg.y, seg.width, seg.height));
-
-  // Optional debug outlines
-  if(debugMode){
-    ctx.strokeStyle='#0f0';
-    ctx.lineWidth=2;
-    pathSegments.forEach(seg => ctx.strokeRect(seg.x, seg.y, seg.width, seg.height));
-    ctx.fillStyle='yellow';
-    ctx.fillText(`Ball: ${ball.x.toFixed(0)}, ${ball.y.toFixed(0)}`, 10, 70);
+  for(const cell of path){
+    ctx.fillRect(cell.x*cellSize, cell.y*cellSize, cellSize, cellSize);
   }
-
-  // Draw finish point
-  const finish = path[path.length-1];
-  ctx.fillStyle='#0f0';
-  ctx.beginPath();
-  ctx.arc(finish.x*cellSize + cellSize/2, finish.y*cellSize + cellSize/2, ballSize/2, 0, Math.PI*2);
-  ctx.fill();
-
   // Draw ball
   ctx.fillStyle='#fff';
   ctx.beginPath();
-  ctx.arc(ball.x, ball.y, ballSize/2, 0, Math.PI*2);
+  ctx.arc(ball.x, ball.y, ballSize/2,0,Math.PI*2);
   ctx.fill();
+
+  // Debug
+  if(debugMode){
+    debugDiv.innerText = `Ball: x=${ball.x.toFixed(0)}, y=${ball.y.toFixed(0)}, tiltX=${tiltX.toFixed(2)}, tiltY=${tiltY.toFixed(2)}`;
+  }
 }
 
 // Game loop
@@ -176,23 +123,27 @@ function gameLoop(){
   }
 }
 
-// Restart button
+// Restart
 restartBtn.addEventListener('click', ()=>{
-  completedMazes=0;
-  counter.innerText=`Mazes Completed: ${completedMazes}`;
   endScreen.style.display='none';
   generatePath();
   gameLoop();
 });
 
-// Debug toggle via D key
-document.addEventListener('keydown', (e)=>{
-  if(e.key.toLowerCase()==='d') debugMode=!debugMode;
+// Start game button (required for mobile Chrome)
+startBtn.addEventListener('click', ()=>{
+  if(typeof DeviceOrientationEvent !== 'undefined' &&
+     typeof DeviceOrientationEvent.requestPermission === 'function'){
+       DeviceOrientationEvent.requestPermission().then(res=>{
+         if(res==='granted') window.addEventListener('deviceorientation', handleOrientation);
+       });
+  } else {
+    window.addEventListener('deviceorientation', handleOrientation);
+  }
+  startBtn.style.display='none';
+  generatePath();
+  gameLoop();
 });
-
-// Start game
-generatePath();
-gameLoop();
 </script>
 </body>
 </html>
