@@ -3,12 +3,21 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gyro Ball Test</title>
+<title>Retro Vector Tilt Path Game</title>
 <style>
-html, body { margin:0; padding:0; overflow:hidden; background:black; }
+html, body { margin:0; padding:0; overflow:hidden; background:black; font-family: monospace; }
 #canvas { display:block; background:black; }
-#debug { position:absolute; top:10px; left:10px; color:#0f0; font-family: monospace; font-size:1.2em; }
-#startBtn { 
+#counter { position:absolute; top:10px; left:10px; color:#0f0; font-size:1.5em; }
+#debug { position:absolute; top:50px; left:10px; color:#0f0; font-size:1em; display:none; }
+#endScreen {
+  position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
+  color:#0f0; font-size:2em; text-align:center; display:none;
+}
+#endScreen button {
+  margin-top:20px; padding:10px 15px; font-size:1em;
+  border:none; border-radius:5px; background:#0f62fe; color:white; cursor:pointer;
+}
+#startBtn {
   position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
   font-size:1.5em; padding:10px 15px;
 }
@@ -16,74 +25,163 @@ html, body { margin:0; padding:0; overflow:hidden; background:black; }
 </head>
 <body>
 <canvas id="canvas"></canvas>
-<div id="debug">tiltX: 0 | tiltY: 0</div>
-<button id="startBtn">Start Gyro</button>
+<div id="counter">Mazes Completed: 0</div>
+<div id="debug">Debug info</div>
+<div id="endScreen">
+  <div id="scoreText">Mazes Completed: 0</div>
+  <button id="restartBtn">Restart</button>
+</div>
+<button id="startBtn">Start Game</button>
 
 <script>
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+const counter = document.getElementById('counter');
 const debugDiv = document.getElementById('debug');
+const endScreen = document.getElementById('endScreen');
+const scoreText = document.getElementById('scoreText');
+const restartBtn = document.getElementById('restartBtn');
 const startBtn = document.getElementById('startBtn');
 
-let tiltX=0, tiltY=0;
+let tiltX=0, tiltY=0, debugMode=true;
 let ball = {x:0, y:0, vx:0, vy:0};
-let ballRadius = 30;
+let ballRadius;
+let path = [];
+let pathSegments = [];
+let completedMazes=0;
+let gridSize = 9;
+let cellSize;
 
-function resize(){
+// Resize canvas
+function resizeCanvas(){
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-  ball.x = canvas.width/2;
-  ball.y = canvas.height/2;
+  cellSize = Math.min(canvas.width, canvas.height)/gridSize;
+  ballRadius = cellSize*0.3;
 }
-window.addEventListener('resize', resize);
-resize();
+resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
 // Handle orientation
 function handleOrientation(e){
-  tiltX = e.gamma/90; // left-right
-  tiltY = e.beta/90;  // front-back
+  tiltX = e.gamma/90;
+  tiltY = e.beta/90;
+}
+
+// Generate a strict horizontal/vertical vector path
+function generatePath(){
+  path = [];
+  let x=0, y=0;
+  path.push({x,y});
+  while(x<gridSize-1 || y<gridSize-1){
+    if(x<gridSize-1 && y<gridSize-1){
+      if(Math.random()<0.5) x++; else y++;
+    } else if(x<gridSize-1){
+      x++;
+    } else {
+      y++;
+    }
+    path.push({x,y});
+  }
+  // Build vector path segments
+  pathSegments = path.map(cell => ({
+    x: cell.x*cellSize + cellSize/2,
+    y: cell.y*cellSize + cellSize/2
+  }));
+  // Place ball in first cell
+  ball.x = pathSegments[0].x;
+  ball.y = pathSegments[0].y;
+  ball.vx = 0; ball.vy = 0;
+}
+
+// Check if ball is on path corridor (circle vs cell)
+function isOnPath(){
+  for(const seg of path){
+    const x0 = seg.x*cellSize + cellSize/2;
+    const y0 = seg.y*cellSize + cellSize/2;
+    if(Math.abs(ball.x - x0)<cellSize/2 && Math.abs(ball.y - y0)<cellSize/2) return true;
+  }
+  return false;
 }
 
 // Update ball position
 function update(){
-  ball.vx += tiltX*5;
-  ball.vy += tiltY*5;
-
-  // Limit speed
-  const maxSpeed = 20;
+  ball.vx += tiltX*2.5;
+  ball.vy += tiltY*2.5;
+  const maxSpeed = cellSize*0.3;
   ball.vx = Math.max(-maxSpeed, Math.min(maxSpeed, ball.vx));
   ball.vy = Math.max(-maxSpeed, Math.min(maxSpeed, ball.vy));
+  ball.x += ball.vx; ball.y += ball.vy;
+  ball.vx *= 0.85; ball.vy *= 0.85;
 
-  ball.x += ball.vx;
-  ball.y += ball.vy;
+  if(!isOnPath()){
+    endScreen.style.display='block';
+    scoreText.innerText = `Mazes Completed: ${completedMazes}`;
+  }
 
-  // Friction
-  ball.vx *= 0.9;
-  ball.vy *= 0.9;
-
-  // Keep inside canvas
-  ball.x = Math.max(ballRadius, Math.min(canvas.width - ballRadius, ball.x));
-  ball.y = Math.max(ballRadius, Math.min(canvas.height - ballRadius, ball.y));
+  // Check finish
+  const finish = pathSegments[pathSegments.length-1];
+  const dx = ball.x - finish.x;
+  const dy = ball.y - finish.y;
+  if(Math.sqrt(dx*dx+dy*dy)<ballRadius){
+    completedMazes++;
+    counter.innerText = `Mazes Completed: ${completedMazes}`;
+    generatePath();
+  }
 }
 
-// Draw
+// Draw vector path and ball
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.fillStyle = 'white';
+
+  // Draw path as green lines
+  ctx.strokeStyle='#0f0';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  for(let i=0;i<pathSegments.length;i++){
+    const p = pathSegments[i];
+    if(i===0) ctx.moveTo(p.x, p.y);
+    else ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
+
+  // Draw finish point
+  const finish = pathSegments[pathSegments.length-1];
+  ctx.strokeStyle='#0f0';
+  ctx.beginPath();
+  ctx.arc(finish.x, finish.y, ballRadius, 0, Math.PI*2);
+  ctx.stroke();
+
+  // Draw ball
+  ctx.fillStyle='#fff';
   ctx.beginPath();
   ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI*2);
   ctx.fill();
 
-  // Debug
-  debugDiv.innerText = `tiltX: ${tiltX.toFixed(2)} | tiltY: ${tiltY.toFixed(2)}`;
+  // Debug overlay
+  if(debugMode){
+    debugDiv.style.display='block';
+    debugDiv.innerText = `Ball: x=${ball.x.toFixed(0)}, y=${ball.y.toFixed(0)}, tiltX=${tiltX.toFixed(2)}, tiltY=${tiltY.toFixed(2)}`;
+  }
 }
 
 // Game loop
-function loop(){
-  update();
-  draw();
-  requestAnimationFrame(loop);
+function gameLoop(){
+  if(endScreen.style.display==='none'){
+    update();
+    draw();
+    requestAnimationFrame(gameLoop);
+  }
 }
+
+// Restart button
+restartBtn.addEventListener('click', ()=>{
+  endScreen.style.display='none';
+  completedMazes=0;
+  counter.innerText=`Mazes Completed: ${completedMazes}`;
+  generatePath();
+  gameLoop();
+});
 
 // Start button for mobile permission
 startBtn.addEventListener('click', ()=>{
@@ -100,7 +198,9 @@ startBtn.addEventListener('click', ()=>{
     window.addEventListener('deviceorientation', handleOrientation);
   }
   startBtn.style.display='none';
-  loop();
+  endScreen.style.display='none';
+  generatePath();
+  gameLoop();
 });
 </script>
 </body>
