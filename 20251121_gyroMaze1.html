@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Random Path Game</title>
+<title>Tilt Path Game</title>
 <style>
   html, body {
     margin: 0;
@@ -14,7 +14,7 @@
   }
   #gameCanvas {
     display: block;
-    background-color: #222;
+    background-color: #111;
   }
   #endScreen {
     position: absolute;
@@ -36,10 +36,18 @@
     color: white;
     cursor: pointer;
   }
+  #counter {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: #fff;
+    font-size: 1.5em;
+  }
 </style>
 </head>
 <body>
 <canvas id="gameCanvas"></canvas>
+<div id="counter">Mazes Completed: 0</div>
 <div id="endScreen">
   <div id="scoreText">Mazes Completed: 0</div>
   <button id="restartBtn">Restart</button>
@@ -48,23 +56,20 @@
 <script>
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-
-let tiltX = 0;
-let tiltY = 0;
-
-const gridSize = 9;
-let cellSize;
-let ballSize;
-let ball = {};
-let path = [];
-let completedMazes = 0;
-
-// End screen elements
 const endScreen = document.getElementById('endScreen');
 const scoreText = document.getElementById('scoreText');
 const restartBtn = document.getElementById('restartBtn');
+const counter = document.getElementById('counter');
+
+let tiltX = 0;
+let tiltY = 0;
+const gridSize = 9;
+let cellSize;
+let ballSize;
+let ball = {x:0, y:0, vx:0, vy:0};
+let path = [];
+let pathSegments = [];
+let completedMazes = 0;
 
 // Resize canvas
 function resizeCanvas() {
@@ -74,51 +79,82 @@ function resizeCanvas() {
   ballSize = cellSize * 0.6;
 }
 resizeCanvas();
+window.addEventListener('resize', resizeCanvas);
 
-// Device orientation
-function handleOrientation(event) {
+// Tilt control
+function handleOrientation(event){
   tiltX = event.gamma / 90;
   tiltY = event.beta / 90;
 }
 window.addEventListener('deviceorientation', handleOrientation);
 
-// Generate a random path from top-left to bottom-right
-function generatePath() {
+// Generate random path from top-left to bottom-right
+function generatePath(){
   path = [];
-  let x = 0;
-  let y = 0;
+  let x=0, y=0;
   path.push({x,y});
-  
-  while(x < gridSize - 1 || y < gridSize - 1){
+  while(x < gridSize-1 || y < gridSize-1){
     const moves = [];
-    if(x < gridSize - 1) moves.push({x:x+1,y});
-    if(y < gridSize - 1) moves.push({x,y:y+1});
+    if(x < gridSize-1) moves.push({x:x+1,y});
+    if(y < gridSize-1) moves.push({x,y:y+1});
     const move = moves[Math.floor(Math.random()*moves.length)];
     path.push(move);
     x = move.x;
     y = move.y;
   }
-
-  // Ball starts at path start
+  // Ball at start
   ball.x = path[0].x*cellSize + cellSize/2;
   ball.y = path[0].y*cellSize + cellSize/2;
   ball.vx = 0;
   ball.vy = 0;
+
+  buildPathSegments();
 }
 
-// Check if ball is on the path
+// Build continuous corridor from path
+function buildPathSegments(){
+  pathSegments = [];
+  const corridorWidth = cellSize;
+  for(let i=0;i<path.length-1;i++){
+    const a = path[i];
+    const b = path[i+1];
+    if(a.x === b.x){ // vertical
+      const x = a.x*cellSize + (cellSize-corridorWidth)/2;
+      const y = Math.min(a.y, b.y)*cellSize;
+      const height = Math.abs(a.y-b.y+1)*cellSize;
+      pathSegments.push({x,y,width:corridorWidth,height});
+    } else { // horizontal
+      const x = Math.min(a.x, b.x)*cellSize;
+      const y = a.y*cellSize + (cellSize-corridorWidth)/2;
+      const width = Math.abs(a.x-b.x+1)*cellSize;
+      pathSegments.push({x,y,width,height:corridorWidth});
+    }
+  }
+}
+
+// Check if ball is inside path corridor
 function isOnPath(ball){
-  for(const cell of path){
-    const cx = cell.x*cellSize + cellSize/2;
-    const cy = cell.y*cellSize + cellSize/2;
-    if(Math.abs(ball.x - cx) < cellSize/2 && Math.abs(ball.y - cy) < cellSize/2){
+  for(const seg of pathSegments){
+    if(ball.x + ballSize/2 > seg.x &&
+       ball.x - ballSize/2 < seg.x + seg.width &&
+       ball.y + ballSize/2 > seg.y &&
+       ball.y - ballSize/2 < seg.y + seg.height){
       return true;
     }
   }
   return false;
 }
 
-function update() {
+// End game
+function endGame(){
+  endScreen.style.display = 'block';
+  scoreText.innerText = `Mazes Completed: ${completedMazes}`;
+  ball.vx = 0;
+  ball.vy = 0;
+}
+
+// Update game
+function update(){
   ball.vx += tiltX*2.5;
   ball.vy += tiltY*2.5;
   const maxSpeed = cellSize*0.3;
@@ -129,13 +165,12 @@ function update() {
   ball.vx *= 0.85;
   ball.vy *= 0.85;
 
-  // Check if off path
+  // Fall off path
   if(!isOnPath(ball)){
-    endScreen.style.display = 'block';
-    scoreText.innerText = `Mazes Completed: ${completedMazes}`;
+    endGame();
   }
 
-  // Check if reached finish
+  // Check finish
   const finish = path[path.length-1];
   const fx = finish.x*cellSize + cellSize/2;
   const fy = finish.y*cellSize + cellSize/2;
@@ -143,34 +178,41 @@ function update() {
   const dy = ball.y - fy;
   if(Math.sqrt(dx*dx + dy*dy) < ballSize/2){
     completedMazes++;
+    counter.innerText = `Mazes Completed: ${completedMazes}`;
     generatePath();
   }
 }
 
-function draw() {
+// Draw
+function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  
-  // Draw path
-  ctx.fillStyle = '#555';
-  for(const cell of path){
-    ctx.fillRect(cell.x*cellSize, cell.y*cellSize, cellSize, cellSize);
+
+  // Floor
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Path
+  ctx.fillStyle = '#0a84ff';
+  for(const seg of pathSegments){
+    ctx.fillRect(seg.x,seg.y,seg.width,seg.height);
   }
 
-  // Draw ball
+  // Finish
+  const finish = path[path.length-1];
+  ctx.fillStyle = '#0f0';
+  ctx.beginPath();
+  ctx.arc(finish.x*cellSize+cellSize/2, finish.y*cellSize+cellSize/2, ballSize/2,0,Math.PI*2);
+  ctx.fill();
+
+  // Ball
   ctx.fillStyle = '#f00';
   ctx.beginPath();
   ctx.arc(ball.x,ball.y,ballSize/2,0,Math.PI*2);
   ctx.fill();
-
-  // Draw finish
-  const finish = path[path.length-1];
-  ctx.fillStyle = '#0f0';
-  ctx.beginPath();
-  ctx.arc(finish.x*cellSize + cellSize/2, finish.y*cellSize + cellSize/2, ballSize/2,0,Math.PI*2);
-  ctx.fill();
 }
 
-function gameLoop() {
+// Game loop
+function gameLoop(){
   if(endScreen.style.display === 'none'){
     update();
     draw();
@@ -181,15 +223,10 @@ function gameLoop() {
 // Restart button
 restartBtn.addEventListener('click', ()=>{
   completedMazes = 0;
+  counter.innerText = `Mazes Completed: ${completedMazes}`;
   endScreen.style.display = 'none';
   generatePath();
   gameLoop();
-});
-
-// Resize
-window.addEventListener('resize', ()=>{
-  resizeCanvas();
-  generatePath();
 });
 
 // Start
