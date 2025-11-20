@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Asteroids-Style Top-Down Shooter — Standalone</title>
+<style>
+  :root{--bg:#000;--fg:#fff;--muted:#9ca3af}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:monospace}
+  canvas{display:block;width:100%;height:100%}
+  .hint{position:fixed;left:12px;bottom:12px;color:var(--muted);font-size:12px;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hint">WASD move • Mouse aim • Left click shoot • Hover 1s or walk near to pick powerups • Enter pause • R restart</div>
+<script>
+/* Standalone single-file game
+   - Asteroids-style white vector outlines on black
+   - Health 0-100%, -5% per enemy collision
+   - Health +20% pickups, Invuln 20s pickup, Bomb, Weapon pickups
+   - Weapon powerups permanent until replaced
+   - Gauss & Gauss-shotgun: short beam(s) lasting ~0.08s
+   - Hover pickup 1s, proximity pickup radius ~44px
+   - Pause (Enter), Restart (R)
+   - requestAnimationFrame loop, efficient arrays
+*/
+
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // Hi-DPI resize
+  function resize(){
+    const dpr = window.devicePixelRatio || 1;
+    const W = Math.max(320, innerWidth);
+    const H = Math.max(240, innerHeight);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    state.W = W; state.H = H;
+  }
+  window.addEventListener('resize', resize);
+
+  // Utilities
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+  const hypot = (x,y) => Math.hypot(x,y);
+  const norm = (x,y) => { const L = hypot(x,y) || 1; return {x: x/L, y: y/L}; };
+  const angDiff = (a,b) => { let d = b - a; while(d > Math.PI) d -= Math.PI*2; while(d < -Math.PI) d += Math.PI*2; return d; };
+  const now = () => performance.now() / 1000;
+
+  // Game state
+  const state = {
+    W: 800, H: 600,
+    running: true,
+    paused: false,
+    score: 0,
+  };
+  resize();
+
+  // Input
+  const keys = {};
+  window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if(e.key==='Enter'){ state.paused = state.running ? !state.paused : state.paused; } if(e.key.toLowerCase()==='r' && !state.running){ reset(); }});
+  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+  const mouse = { x: state.W/2, y: state.H/2, down:false };
+  canvas.addEventListener('mousemove', e => { const r = canvas.getBoundingClientRect(); mouse.x = e.clientX - r.left; mouse.y = e.clientY - r.top; });
+  canvas.addEventListener('mousedown', e => { if(e.button===0) mouse.down = true; });
+  window.addEventListener('mouseup', e => { if(e.button===0) mouse.down = false; });
+
+  // Player
+  function createPlayer(){
+    return {
+      x: state.W/2, y: state.H/2,
+      vx:0, vy:0,
+      radius:14,
+      maxSpeed:260, // px/s
+      accel:1400, // px/s^2
+      friction:6,
+      fireCooldown:0,
+      fireRate:0.12, // normal
+      invuln:0, // seconds
+      health:100,
+      weapon: { tag:'normal', bulletsPerShot:1, spread:0, pierce:1, range:800, cooldown:0.12 }
+    };
+  }
+  let player = createPlayer();
+
+  // Entities
+  const bullets = []; // {x,y,vx,vy,life,pierce}
+  const enemies = []; // Enemy instances
+  const powerups = []; // Powerup instances
+  const bombFlashes = []; // visual flashes
+  const gaussBeams = []; // {x1,y1,x2,y2,life,max,thickness}
+
+  // Enemy class
+  class Enemy {
+    constructor(x,y,angle,speed,turnRate){
+      this.x = x; this.y = y;
+      this.angle = angle || 0;
+      this.speed = speed || 70;
+      this.turnRate = turnRate || 1.2;
+      this.radius = 12;
+      this.dead = false;
+      this.directionUpdateTimer = 0; // use continuous limited turning but can add discrete delay later
+    }
+    update(dt){
+      // limited angular turn toward player
+      const desired = Math.atan2(player.y - this.y, player.x - this.x);
+      const diff = angDiff(this.angle, desired);
+      const maxTurn = this.turnRate * dt;
+      const turn = clamp(diff, -maxTurn, maxTurn);
+      this.angle += turn;
+      this.x += Math.cos(this.angle) * this.speed * dt;
+      this.y += Math.sin(this.angle) * this.speed * dt;
+    }
+    draw(){
+      ctx.lineWidth = 1.2; ctx.strokeStyle = '#fff';
+      const cos = Math.cos(this.angle), sin = Math.sin(this.angle);
+      const p1x = this.x + cos*10, p1y = this.y + sin*10;
+      const p2x = this.x - sin*8, p2y = this.y + cos*8;
+      const p3x = this.x - cos*10, p3y = this.y - sin*10;
+      const p4x = this.x + sin*8, p4y = this.y - cos*8;
+      ctx.beginPath(); ctx.moveTo(p1x,p1y); ctx.lineTo(p2x,p2y); ctx.lineTo(p3x,p3y); ctx.lineTo(p4x,p4y); ctx.closePath(); ctx.stroke();
+    }
+  }
+
+  // Powerup class
+  class Powerup {
+    constructor(x,y,type,data){
+      this.x = x; this.y = y; this.type = type; this.data = data || {};
+      this.size = 16; // larger icons
+      this.hover = 0; // seconds
+      this.required = 1.0; // 1s hover for pickup
+      this.prox = 44; // proximity pickup radius
+    }
+    update(dt){
+      const dx = mouse.x - this.x, dy = mouse.y - this.y;
+      const md = Math.hypot(dx,dy);
+      if(md <= this.size * 1.6) this.hover += dt; else this.hover = 0;
+    }
+    isHoverReady(){ return this.hover >= this.required; }
+    isProx(){ return hypot(player.x - this.x, player.y - this.y) <= this.prox; }
+    draw(){
+      ctx.lineWidth = 1.6; ctx.strokeStyle = '#fff';
+      // icon by type, larger & clear
+      if(this.type === 'bomb'){
+        ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(this.x-6,this.y); ctx.lineTo(this.x+6,this.y); ctx.moveTo(this.x,this.y-6); ctx.lineTo(this.x,this.y+6); ctx.stroke();
+      } else if(this.type === 'health'){
+        ctx.beginPath(); ctx.rect(this.x-10,this.y-10,20,20); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(this.x-6,this.y); ctx.lineTo(this.x+6,this.y); ctx.moveTo(this.x,this.y-6); ctx.lineTo(this.x,this.y+6); ctx.stroke();
+      } else if(this.type === 'invuln'){
+        ctx.beginPath(); ctx.arc(this.x,this.y,this.size,0,Math.PI*2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(this.x-6,this.y-6); ctx.lineTo(this.x+6,this.y+6); ctx.moveTo(this.x+6,this.y-6); ctx.lineTo(this.x-6,this.y+6); ctx.stroke();
+      } else if(this.type === 'shotgun'){
+        ctx.beginPath(); ctx.moveTo(this.x-10,this.y+8); ctx.lineTo(this.x, this.y-8); ctx.lineTo(this.x+10,this.y+8); ctx.closePath(); ctx.stroke();
+      } else if(this.type === 'pierce'){
+        ctx.beginPath(); ctx.moveTo(this.x-10,this.y+8); ctx.lineTo(this.x+10,this.y+8); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(this.x-6,this.y-6); ctx.lineTo(this.x-2,this.y+0); ctx.moveTo(this.x+2,this.y-6); ctx.lineTo(this.x+6,this.y+0); ctx.stroke();
+      } else if(this.type === 'range'){
+        ctx.beginPath(); ctx.moveTo(this.x-12,this.y+8); ctx.lineTo(this.x+12,this.y+8); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(this.x,this.y-10); ctx.lineTo(this.x,this.y+8); ctx.stroke();
+      } else if(this.type === 'gauss'){
+        ctx.beginPath(); ctx.moveTo(this.x-10,this.y+8); ctx.lineTo(this.x, this.y-8); ctx.lineTo(this.x+10,this.y+8); ctx.closePath(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(this.x,this.y-8); ctx.lineTo(this.x,this.y-20); ctx.stroke();
+      } else if(this.type === 'gauss-shotgun'){
+        ctx.beginPath(); ctx.moveTo(this.x-12,this.y+8); ctx.lineTo(this.x, this.y-8); ctx.lineTo(this.x+12,this.y+8); ctx.closePath(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(this.x-6,this.y-8); ctx.lineTo(this.x-10,this.y-20); ctx.moveTo(this.x+6,this.y-8); ctx.lineTo(this.x+10,this.y-20); ctx.stroke();
+      } else {
+        // fallback icon
+        ctx.beginPath(); ctx.rect(this.x-8,this.y-8,16,16); ctx.stroke();
+      }
+
+      // label above
+      ctx.font = '12px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
+      let label = this.type.toUpperCase();
+      if(this.type === 'gauss') label = 'GAUSSGUN';
+      if(this.type === 'gauss-shotgun') label = 'GAUSS-SG';
+      if(this.type === 'health') label = 'HEALTH +20%';
+      if(this.type === 'invuln') label = 'INVULN 20s';
+      ctx.fillText(label, this.x, this.y - this.size - 10);
+
+      // hover ring
+      if(this.hover > 0 && this.hover < this.required){
+        const t = this.hover / this.required;
+        ctx.beginPath(); ctx.arc(this.x,this.y,this.size + 5, -Math.PI/2, -Math.PI/2 + Math.PI*2*t); ctx.stroke();
+      }
+    }
+  }
+
+  // Bullet entity (small)
+  function spawnBullet(x,y,vx,vy,range,pierce){
+    bullets.push({ x,y,vx,vy,life:range,pierce: pierce||1 });
+  }
+
+  // Gauss beam spawn (instant beam across map). We create a short-lived visual beam and perform collision sweep immediately.
+  function spawnGauss(x,y,angle,isShotgun){
+    const maxDist = Math.max(state.W, state.H) * 1.6;
+    if(isShotgun){
+      const spread = 0.05;
+      const count = 5; // 3-5 beams for shotgun
+      const offsets = (count===3) ? [-1,0,1] : [-2,-1,0,1,2];
+      offsets.forEach(off => {
+        const ang = angle + off * spread;
+        const x2 = x + Math.cos(ang) * maxDist;
+        const y2 = y + Math.sin(ang) * maxDist;
+        gaussBeams.push({ x1:x,y1:y,x2,y2, life:0.09, max:0.09, thickness:2.4 });
+        // sweep kill
+        for(let i=enemies.length-1;i>=0;i--){
+          const e = enemies[i];
+          const d = pointSegmentDistance(e.x,e.y,x,y,x2,y2);
+          if(d <= e.radius + 2){ enemies.splice(i,1); state.score += 10; }
+        }
+      });
+    } else {
+      const x2 = x + Math.cos(angle) * maxDist;
+      const y2 = y + Math.sin(angle) * maxDist;
+      gaussBeams.push({ x1:x,y1:y,x2,y2, life:0.08, max:0.08, thickness:2.6 });
+      for(let i=enemies.length-1;i>=0;i--){
+        const e = enemies[i];
+        const d = pointSegmentDistance(e.x,e.y,x,y,x2,y2);
+        if(d <= e.radius + 2){ enemies.splice(i,1); state.score += 10; }
+      }
+    }
+  }
+
+  function pointSegmentDistance(px,py,x1,y1,x2,y2){
+    const A = px - x1, B = py - y1, C = x2 - x1, D = y2 - y1;
+    const dot = A*C + B*D; const lenSq = C*C + D*D;
+    let t = lenSq !== 0 ? dot / lenSq : -1;
+    let xx, yy;
+    if(t < 0){ xx = x1; yy = y1; } else if(t > 1){ xx = x2; yy = y2; } else { xx = x1 + t*C; yy = y1 + t*D; }
+    return hypot(px-xx, py-yy);
+  }
+
+  // Spawn helpers
+  let elapsed = 0;
+  let enemySpawnTimer = 0;
+  let powerSpawnTimer = 1.5;
+  const baseSpawnInterval = 1.4;
+
+  function spawnEnemy(){
+    const margin = 40;
+    const side = Math.floor(Math.random()*4);
+    let x,y;
+    if(side===0){ x = -margin; y = Math.random() * state.H; }
+    else if(side===1){ x = state.W + margin; y = Math.random() * state.H; }
+    else if(side===2){ x = Math.random() * state.W; y = -margin; }
+    else { x = Math.random() * state.W; y = state.H + margin; }
+    const dir = norm(player.x - x, player.y - y);
+    const angle = Math.atan2(dir.y, dir.x) + (Math.random()-0.5)*0.6;
+    const speed = 60 + Math.random()*45 + Math.min(60, elapsed * 0.5);
+    const turnRate = 1.2 + Math.random()*1.0;
+    enemies.push(new Enemy(x,y,angle,speed,turnRate));
+  }
+
+  function spawnPowerup(){
+    const margin = 60;
+    const x = margin + Math.random()*(state.W - 2*margin);
+    const y = margin + Math.random()*(state.H - 2*margin);
+    const r = Math.random();
+    if(r < 0.25) powerups.push(new Powerup(x,y,'bomb',{radius:320}));
+    else if(r < 0.45) powerups.push(new Powerup(x,y,'health'));
+    else if(r < 0.60) powerups.push(new Powerup(x,y,'invuln'));
+    else if(r < 0.78){
+      const types = ['shotgun','pierce','range'];
+      const t = types[Math.floor(Math.random()*types.length)];
+      let data = {};
+      if(t==='shotgun') data = { bulletsPerShot:5, spread:0.45, pierce:1, range:700, cooldown:0.28, tag:'shotgun' };
+      if(t==='pierce') data = { bulletsPerShot:1, spread:0, pierce:4, range:1000, cooldown:0.16, tag:'pierce' };
+      if(t==='range') data = { bulletsPerShot:1, spread:0, pierce:1, range:1600, cooldown:0.12, tag:'range' };
+      powerups.push(new Powerup(x,y,'weapon',data));
+    } else {
+      const t = Math.random() < 0.66 ? 'gauss' : 'gauss-shotgun';
+      powerups.push(new Powerup(x,y,t));
+    }
+  }
+
+  // Collision helper for circles
+  function circleHit(ax,ay,ar,bx,by,br){ return hypot(ax-bx,ay-by) <= (ar+br); }
+
+  // Main loop
+  let lastTime = now();
+  function step(){
+    const t = now();
+    let dt = Math.min(0.05, t - lastTime);
+    lastTime = t;
+    if(state.running && !state.paused){
+      elapsed += dt;
+
+      // spawn scaling
+      enemySpawnTimer -= dt;
+      const spawnInterval = Math.max(0.18, baseSpawnInterval * (1 - elapsed/100));
+      if(enemySpawnTimer <= 0){ spawnEnemy(); enemySpawnTimer = spawnInterval; }
+
+      powerSpawnTimer -= dt;
+      if(powerSpawnTimer <= 0){ spawnPowerup(); powerSpawnTimer = 4 + Math.random()*10; }
+
+      // player update
+      playerUpdate(dt);
+
+      // powerups hover updates
+      for(const p of powerups) p.update(dt);
+
+      // bullets update
+      for(let i=bullets.length-1;i>=0;i--){
+        const b = bullets[i];
+        b.x += b.vx * dt; b.y += b.vy * dt;
+        b.life -= dt;
+        if(b.life <= 0) { bullets.splice(i,1); continue; }
+      }
+
+      // enemies update
+      for(let i=enemies.length-1;i>=0;i--){
+        const e = enemies[i];
+        e.update(dt);
+        // player collision (health)
+        if(player.invuln <= 0 && circleHit(e.x,e.y,e.radius, player.x,player.y, player.radius - 6)){
+          enemies.splice(i,1);
+          player.health = Math.max(0, (player.health || 100) - 5);
+          player.invuln = Math.max(player.invuln, 2.0);
+          if(player.health <= 0){ state.running = false; }
+          continue;
+        }
+        // bullet collisions
+        let killed = false;
+        for(let j=bullets.length-1;j>=0;j--){
+          const b = bullets[j];
+          if(circleHit(e.x,e.y,e.radius, b.x,b.y, 2.5)){
+            // apply bullet pierce
+            b.pierce = (b.pierce||1) - 1;
+            if(b.pierce <= 0) b.life = 0;
+            bullets.splice(j, b.life<=0 ? 1 : 0);
+            enemies.splice(i,1);
+            state.score += 10;
+            killed = true;
+            break;
+          }
+        }
+        if(killed) continue;
+        // cull far away
+        if(e.x < -300 || e.x > state.W + 300 || e.y < -300 || e.y > state.H + 300) enemies.splice(i,1);
+      }
+
+      // powerup pickup (hover OR proximity)
+      for(let i=powerups.length-1;i>=0;i--){
+        const p = powerups[i];
+        const hoverOK = p.isHoverReady();
+        const proxOK = p.isProx();
+        if(hoverOK || proxOK){
+          // apply
+          if(p.type === 'bomb'){
+            const R = (p.data && p.data.radius) ? p.data.radius : 260;
+            triggerBombFlash(p.x,p.y,R);
+            for(let j=enemies.length-1;j>=0;j--){
+              if(hypot(enemies[j].x - p.x, enemies[j].y - p.y) <= R){
+                enemies.splice(j,1); state.score += 10;
+              }
+            }
+          } else if(p.type === 'health'){
+            player.health = Math.min(100, (player.health || 100) + 20);
+          } else if(p.type === 'invuln'){
+            player.invuln = Math.max(player.invuln, 20.0);
+          } else if(p.type === 'gauss'){
+            player.weapon = { tag:'gauss', cooldown:0.15, gauss:true };
+          } else if(p.type === 'gauss-shotgun'){
+            player.weapon = { tag:'gauss-shotgun', cooldown:0.40, gauss:true, shotgun:true };
+          } else if(p.type === 'weapon'){
+            // permanent until replaced
+            player.weapon = {
+              tag: (p.data && p.data.tag) || 'weapon',
+              bulletsPerShot: p.data.bulletsPerShot || 1,
+              spread: p.data.spread || 0,
+              pierce: p.data.pierce || 1,
+              range: p.data.range || 800,
+              cooldown: p.data.cooldown || 0.12
+            };
+          } else {
+            // other weapon names mapping
+            player.weapon = { tag:p.type, cooldown:0.18 };
+          }
+          powerups.splice(i,1);
+        }
+      }
+
+      // bomb flash lifetime
+      for(let i=bombFlashes.length-1;i>=0;i--){
+        bombFlashes[i].life -= dt;
+        if(bombFlashes[i].life <= 0) bombFlashes.splice(i,1);
+      }
+
+      // gauss beams lifetime
+      for(let i=gaussBeams.length-1;i>=0;i--){
+        gaussBeams[i].life -= dt;
+        if(gaussBeams[i].life <= 0) gaussBeams.splice(i,1);
+      }
+    }
+    render();
+    requestAnimationFrame(step);
+  }
+
+  // Trigger bomb flash visual
+  function triggerBombFlash(x,y,R){
+    bombFlashes.push({ x,y,R, life:0.12, max:0.12 });
+  }
+
+  // Player update & firing
+  function playerUpdate(dt){
+    // input accel
+    let dx=0, dy=0;
+    if(keys['w']) dy -= 1;
+    if(keys['s']) dy += 1;
+    if(keys['a']) dx -= 1;
+    if(keys['d']) dx += 1;
+    if(dx || dy){
+      const n = Math.hypot(dx,dy) || 1;
+      player.vx += (dx/n) * player.accel * dt;
+      player.vy += (dy/n) * player.accel * dt;
+    } else {
+      // deceleration
+      const decel = player.friction * player.accel * dt * 0.001;
+      const ratio = Math.max(0, 1 - decel);
+      player.vx *= ratio; player.vy *= ratio;
+      if(Math.hypot(player.vx,player.vy) < 4){ player.vx = 0; player.vy = 0; }
+    }
+    // clamp speed
+    const spd = Math.hypot(player.vx, player.vy);
+    if(spd > player.maxSpeed){ const f = player.maxSpeed / spd; player.vx *= f; player.vy *= f; }
+    player.x += player.vx * dt;
+    player.y += player.vy * dt;
+
+    // wrap
+    const r = player.radius;
+    if(player.x < -r) player.x = state.W + r;
+    if(player.x > state.W + r) player.x = -r;
+    if(player.y < -r) player.y = state.H + r;
+    if(player.y > state.H + r) player.y = -r;
+
+    // invuln timer decrement
+    if(player.invuln > 0) player.invuln = Math.max(0, player.invuln - dt);
+
+    // aim angle not stored but computed when firing
+    // firing logic
+    player.fireCooldown = player.fireCooldown - dt;
+    if(mouse.down){
+      const wpn = player.weapon || { tag:'normal', cooldown:0.12 };
+      const cooldown = wpn.cooldown !== undefined ? wpn.cooldown : 0.12;
+      // gauss & gauss shotgun handled separately
+      if(wpn.gauss){
+        // gauss gun
+        if(player.fireCooldown <= 0){
+          const ang = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+          if(wpn.shotgun) spawnGauss(player.x, player.y, ang, true);
+          else spawnGauss(player.x, player.y, ang, false);
+          player.fireCooldown = wpn.cooldown || 0.28;
+        }
+      } else {
+        if(player.fireCooldown <= 0){
+          // fire bullets according to weapon
+          const w = player.weapon;
+          const base = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+          const shots = (w.bulletsPerShot) ? w.bulletsPerShot : 1;
+          for(let i=0;i<shots;i++){
+            const t = shots===1 ? 0 : (i/(shots-1) - 0.5) * (w.spread || 0);
+            const ang = base + t;
+            const speed = 900;
+            const vx = Math.cos(ang)*speed, vy = Math.sin(ang)*speed;
+            spawnBullet(player.x + Math.cos(ang)*16, player.y + Math.sin(ang)*16, vx, vy, (w.range||800)/1000, w.pierce || 1);
+          }
+          player.fireCooldown = w.cooldown || 0.12;
+        }
+      }
+    }
+  }
+
+  // spawnBullet: life in seconds (range/ speed gives life)
+  function spawnBullet(x,y,vx,vy, life, pierce){
+    bullets.push({ x,y,vx,vy, life: life, pierce: pierce });
+  }
+
+  // draw everything
+  function render(){
+    // clear
+    ctx.fillStyle = '#000'; ctx.fillRect(0,0,state.W,state.H);
+
+    // gauss beams (under player)
+    for(const g of gaussBeams){
+      const alpha = clamp(g.life / g.max * 6, 0, 1);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = g.thickness;
+      ctx.strokeStyle = '#fff';
+      ctx.beginPath(); ctx.moveTo(g.x1,g.y1); ctx.lineTo(g.x2,g.y2); ctx.stroke();
+      ctx.restore();
+    }
+
+    // bullets
+    ctx.lineWidth = 1.2; ctx.strokeStyle = '#fff';
+    for(const b of bullets){
+      ctx.beginPath(); ctx.moveTo(b.x - b.vx * 0.02, b.y - b.vy * 0.02); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+
+    // enemies
+    for(const e of enemies) e.draw();
+
+    // powerups
+    for(const p of powerups) p.draw();
+
+    // player (draw on top)
+    drawPlayer();
+
+    // bomb flashes
+    for(const f of bombFlashes){
+      const t = 1 - (f.life / f.max);
+      const alpha = clamp(1 - (f.life / f.max), 0, 1);
+      const r = f.R * (0.9 + 0.4 * t);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#fff';
+      ctx.beginPath(); ctx.arc(f.x,f.y,r,0,Math.PI*2); ctx.stroke();
+      ctx.restore();
+    }
+
+    // HUD: score, health, weapon
+    ctx.save();
+    ctx.font = '14px monospace';
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'top';
+    ctx.fillText('Score: ' + state.score, 12, 12);
+
+    ctx.fillText('Health:', 12, 36);
+    ctx.strokeStyle = '#fff'; ctx.strokeRect(82,36,220,14);
+    const hp = clamp(player.health,0,100);
+    ctx.fillStyle = '#fff'; ctx.fillRect(82,36, 220*(hp/100), 14);
+
+    const wpn = player.weapon && player.weapon.tag ? player.weapon.tag.toUpperCase() : 'NORMAL';
+    ctx.fillStyle = '#fff'; ctx.fillText('WEAPON: ' + wpn, 12, 60);
+
+    ctx.restore();
+
+    // overlays
+    if(state.paused){
+      ctx.save(); ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,state.W,state.H);
+      ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.font='36px monospace'; ctx.fillText('PAUSED', state.W/2, state.H/2 - 18); ctx.restore();
+    }
+    if(!state.running){
+      ctx.save(); ctx.fillStyle='rgba(0,0,0,0.6)'; ctx.fillRect(0,0,state.W,state.H);
+      ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.font='36px monospace'; ctx.fillText('GAME OVER', state.W/2, state.H/2 - 28);
+      ctx.font='20px monospace'; ctx.fillText('FINAL SCORE: ' + state.score, state.W/2, state.H/2 + 6);
+      ctx.fillText('Press R to restart', state.W/2, state.H/2 + 36); ctx.restore();
+    }
+  }
+
+  function drawPlayer(){
+    if(player.invuln > 0){
+      const phase = Math.floor(performance.now() * 0.008) % 2;
+      if(phase===0) return;
+    }
+    const ang = Math.atan2(mouse.y - player.y, mouse.x - player.x);
+    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(ang);
+    ctx.lineWidth = 1.2; ctx.strokeStyle = '#fff';
+    ctx.beginPath(); ctx.moveTo(12,0); ctx.lineTo(-10,8); ctx.lineTo(-6,0); ctx.lineTo(-10,-8); ctx.closePath(); ctx.stroke();
+    ctx.restore();
+  }
+
+  // Helpers & reset
+  function reset(){
+    bullets.length = 0; enemies.length = 0; powerups.length = 0; bombFlashes.length = 0; gaussBeams.length = 0;
+    state.score = 0; elapsed = 0; enemySpawnTimer = 0; powerSpawnTimer = 1.5;
+    player = createPlayer(); state.running = true; state.paused = false; lastTime = now();
+    // start with some enemies
+    for(let i=0;i<4;i++) spawnEnemy();
+  }
+
+  // utilities
+  function pointSegmentDistance(px,py,x1,y1,x2,y2){
+    return pointSegmentDistance; // placeholder to avoid lint; real usage uses pointSegmentDistance function above
+  }
+
+  function pointToSegmentDist(px,py,x1,y1,x2,y2){
+    return pointSegmentDistance(px,py,x1,y1,x2,y2);
+  }
+
+  function pointSegmentDistance(px,py,x1,y1,x2,y2){
+    const A = px - x1, B = py - y1, C = x2 - x1, D = y2 - y1;
+    const dot = A*C + B*D; const lenSq = C*C + D*D;
+    let param = lenSq !== 0 ? dot / lenSq : -1;
+    let xx, yy;
+    if(param < 0){ xx = x1; yy = y1; } else if(param > 1){ xx = x2; yy = y2; } else { xx = x1 + param*C; yy = y1 + param*D; }
+    return hypot(px-xx, py-yy);
+  }
+
+  // initial spawn
+  reset();
+
+  // small fix: ensure functions referenced earlier exist
+  function pointToSegmentDistanceAlias(px,py,x1,y1,x2,y2){ return pointSegmentDistance(px,py,x1,y1,x2,y2); }
+  // expose helper used by gauss/spawn functions (already using pointSegmentDistance)
+  // Run loop
+  let lastTimeMark = performance.now();
+  function runner(){
+    step();
+  }
+  requestAnimationFrame(step);
+
+})();
+</script>
+</body>
+</html>
