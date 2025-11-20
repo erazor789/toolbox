@@ -3,16 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tilt Path Prototype</title>
+<title>Gyro Ball Test</title>
 <style>
-html, body { margin:0; padding:0; overflow:hidden; background:black; font-family: monospace; }
-#gameCanvas { display:block; background:black; }
-#debug { position:absolute; top:10px; left:10px; color:#0f0; font-size:1em; }
-#endScreen {
-  position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
-  color:#0f0; font-size:1.5em; text-align:center; display:none;
-}
-#endScreen button { margin-top:10px; padding:5px 10px; font-size:1em; }
+html, body { margin:0; padding:0; overflow:hidden; background:black; }
+#canvas { display:block; background:black; }
+#debug { position:absolute; top:10px; left:10px; color:#0f0; font-family: monospace; font-size:1.2em; }
 #startBtn { 
   position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
   font-size:1.5em; padding:10px 15px;
@@ -20,129 +15,92 @@ html, body { margin:0; padding:0; overflow:hidden; background:black; font-family
 </style>
 </head>
 <body>
-<canvas id="gameCanvas"></canvas>
-<div id="debug">Debug info</div>
-<div id="endScreen">
-  <div>Game Over!</div>
-  <button id="restartBtn">Restart</button>
-</div>
-<button id="startBtn">Start Game</button>
+<canvas id="canvas"></canvas>
+<div id="debug">tiltX: 0 | tiltY: 0</div>
+<button id="startBtn">Start Gyro</button>
 
 <script>
-const canvas = document.getElementById('gameCanvas');
+const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const debugDiv = document.getElementById('debug');
-const endScreen = document.getElementById('endScreen');
-const restartBtn = document.getElementById('restartBtn');
 const startBtn = document.getElementById('startBtn');
 
-let tiltX=0, tiltY=0, debugMode=true;
-const gridSize = 5;
-let cellSize, ballSize;
+let tiltX=0, tiltY=0;
 let ball = {x:0, y:0, vx:0, vy:0};
-let path = [];
-let completed = 0;
+let ballRadius = 30;
 
-// Resize canvas
-function resizeCanvas(){
+function resize(){
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
-  cellSize = Math.min(canvas.width, canvas.height)/gridSize;
-  ballSize = cellSize*0.6;
+  ball.x = canvas.width/2;
+  ball.y = canvas.height/2;
 }
-resizeCanvas();
-window.addEventListener('resize', resizeCanvas);
+window.addEventListener('resize', resize);
+resize();
 
-// Handle tilt
+// Handle orientation
 function handleOrientation(e){
-  tiltX = e.gamma/90;
-  tiltY = e.beta/90;
+  tiltX = e.gamma/90; // left-right
+  tiltY = e.beta/90;  // front-back
 }
 
-// Simple straight path
-function generatePath(){
-  path = [];
-  for(let i=0;i<gridSize;i++){
-    path.push({x:i, y:i});
-  }
-  ball.x = path[0].x*cellSize + cellSize/2;
-  ball.y = path[0].y*cellSize + cellSize/2;
-  ball.vx = 0; ball.vy = 0;
-}
-
-// Check if ball is on path
-function isOnPath(){
-  for(const cell of path){
-    if(ball.x > cell.x*cellSize && ball.x < (cell.x+1)*cellSize &&
-       ball.y > cell.y*cellSize && ball.y < (cell.y+1)*cellSize)
-       return true;
-  }
-  return false;
-}
-
-// Update
+// Update ball position
 function update(){
-  ball.vx += tiltX*2;
-  ball.vy += tiltY*2;
-  ball.vx = Math.max(-cellSize*0.3, Math.min(cellSize*0.3, ball.vx));
-  ball.vy = Math.max(-cellSize*0.3, Math.min(cellSize*0.3, ball.vy));
-  ball.x += ball.vx; ball.y += ball.vy;
-  ball.vx *= 0.85; ball.vy *= 0.85;
+  ball.vx += tiltX*5;
+  ball.vy += tiltY*5;
 
-  if(!isOnPath()){
-    endScreen.style.display='block';
-  }
+  // Limit speed
+  const maxSpeed = 20;
+  ball.vx = Math.max(-maxSpeed, Math.min(maxSpeed, ball.vx));
+  ball.vy = Math.max(-maxSpeed, Math.min(maxSpeed, ball.vy));
+
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // Friction
+  ball.vx *= 0.9;
+  ball.vy *= 0.9;
+
+  // Keep inside canvas
+  ball.x = Math.max(ballRadius, Math.min(canvas.width - ballRadius, ball.x));
+  ball.y = Math.max(ballRadius, Math.min(canvas.height - ballRadius, ball.y));
 }
 
 // Draw
 function draw(){
   ctx.clearRect(0,0,canvas.width,canvas.height);
-  // Draw path
-  ctx.fillStyle='#0f0';
-  for(const cell of path){
-    ctx.fillRect(cell.x*cellSize, cell.y*cellSize, cellSize, cellSize);
-  }
-  // Draw ball
-  ctx.fillStyle='#fff';
+  ctx.fillStyle = 'white';
   ctx.beginPath();
-  ctx.arc(ball.x, ball.y, ballSize/2,0,Math.PI*2);
+  ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI*2);
   ctx.fill();
 
   // Debug
-  if(debugMode){
-    debugDiv.innerText = `Ball: x=${ball.x.toFixed(0)}, y=${ball.y.toFixed(0)}, tiltX=${tiltX.toFixed(2)}, tiltY=${tiltY.toFixed(2)}`;
-  }
+  debugDiv.innerText = `tiltX: ${tiltX.toFixed(2)} | tiltY: ${tiltY.toFixed(2)}`;
 }
 
 // Game loop
-function gameLoop(){
-  if(endScreen.style.display==='none'){
-    update();
-    draw();
-    requestAnimationFrame(gameLoop);
-  }
+function loop(){
+  update();
+  draw();
+  requestAnimationFrame(loop);
 }
 
-// Restart
-restartBtn.addEventListener('click', ()=>{
-  endScreen.style.display='none';
-  generatePath();
-  gameLoop();
-});
-
-// Start game button (required for mobile Chrome)
+// Start button for mobile permission
 startBtn.addEventListener('click', ()=>{
   if(typeof DeviceOrientationEvent !== 'undefined' &&
      typeof DeviceOrientationEvent.requestPermission === 'function'){
        DeviceOrientationEvent.requestPermission().then(res=>{
-         if(res==='granted') window.addEventListener('deviceorientation', handleOrientation);
-       });
+         if(res==='granted'){
+           window.addEventListener('deviceorientation', handleOrientation);
+         } else {
+           alert('Permission denied');
+         }
+       }).catch(console.error);
   } else {
     window.addEventListener('deviceorientation', handleOrientation);
   }
   startBtn.style.display='none';
-  generatePath();
-  gameLoop();
+  loop();
 });
 </script>
 </body>
