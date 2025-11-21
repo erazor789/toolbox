@@ -1,48 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-  <title>Gyro Path Game</title>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #000;
-      overflow: hidden;
-      touch-action: none;
-      font-family: monospace;
-      color: #00ff66;
-    }
-    #ui {
-      position: fixed;
-      bottom: 10px;
-      left: 50%;
-      transform: translateX(-50%);
-      text-align: center;
-      font-size: 14px;
-      line-height: 1.4;
-      pointer-events: none;
-    }
-    #permissionBtn {
-      pointer-events: auto;
-      margin-top: 6px;
-      padding: 6px 10px;
-      background: black;
-      color: #00ff66;
-      border: 1px solid #00ff66;
-    }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Retro Vector Tilt Path Game</title>
+<style>
+  html, body { margin:0; padding:0; background:#000; overflow:hidden; font-family: monospace; color:#0f0; }
+  canvas { display:block; width:100vw; height:100vh; background:#000; }
+  #ui { position: fixed; bottom: 10px; left:50%; transform:translateX(-50%); text-align:center; font-size:14px; }
+  button { background:transparent; color:#0f0; border:1px solid #0f0; padding:5px 10px; font-family: monospace; margin-top:4px; }
+</style>
 </head>
 <body>
 <canvas id="game"></canvas>
 <div id="ui">
   <div>Mazes Cleared: <span id="score">0</span></div>
   <div>Tilt X: <span id="tiltX">0</span> | Tilt Y: <span id="tiltY">0</span></div>
-  <div>Press D to toggle debug</div>
   <button id="permissionBtn">Enable Gyro</button>
 </div>
-
 <script>
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
@@ -51,212 +26,106 @@ const tiltXEl = document.getElementById('tiltX');
 const tiltYEl = document.getElementById('tiltY');
 const permissionBtn = document.getElementById('permissionBtn');
 
-let W, H;
-let score = 0;
-let debug = false;
-let tiltX = 0;
-let tiltY = 0;
+let W,H,score=0,debug=false;
+let tiltX=0,tiltY=0;
+let pathPolygons=[],ball,endZone;
 
-let pathPolygons = [];
-let ball;
-let endZone;
+function resize(){ W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight; }
+window.addEventListener('resize',resize); resize();
 
-function resize() {
-  W = canvas.width = window.innerWidth;
-  H = canvas.height = window.innerHeight;
-}
-window.addEventListener('resize', resize);
-resize();
-
-// ---- Gyro Handling (Android Chrome compatible) ----
-function handleOrientation(e) {
-  tiltX = e.gamma || 0; // left/right
-  tiltY = e.beta || 0;  // front/back
-  tiltXEl.textContent = tiltX.toFixed(1);
-  tiltYEl.textContent = tiltY.toFixed(1);
-}
-
-permissionBtn.addEventListener('click', () => {
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    DeviceOrientationEvent.requestPermission().then(resp => {
-      if (resp === 'granted') window.addEventListener('deviceorientation', handleOrientation);
-    });
-  } else {
-    window.addEventListener('deviceorientation', handleOrientation);
-  }
+// Gyro Handling
+function handleOrientation(e){ tiltX=e.gamma||0; tiltY=e.beta||0; tiltXEl.textContent=tiltX.toFixed(1); tiltYEl.textContent=tiltY.toFixed(1); }
+permissionBtn.addEventListener('click',()=>{
+  if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+    DeviceOrientationEvent.requestPermission().then(resp=>{ if(resp==='granted') window.addEventListener('deviceorientation', handleOrientation); });
+  }else{ window.addEventListener('deviceorientation', handleOrientation); }
 });
 
-// ---- Game Objects ----
-function createBall() {
-  return {
-    r: Math.min(W, H) * 0.03,
-    x: W / 2,
-    y: H - 80,
-    vx: 0,
-    vy: 0
-  };
-}
+function createBall(){ return { r:Math.min(W,H)*0.03, x:W/2, y:H-140, vx:0, vy:0 }; }
 
-function generatePath() {
-  pathPolygons = [];
+function generatePath(){
+  pathPolygons=[];
+  const pathWidth=W*0.18;
+  const zoneWidth=pathWidth*1.8;
+  const segmentHeight=H/8;
+  let x=W/2, y=H-140;
 
-  const pathWidth = W * 0.18;
-  const zoneWidth = pathWidth * 1.8;
-  const segmentHeight = H / 8;
-
-  let x = W / 2;
-  let y = H - 140;
-
-  // --- Start Zone (larger platform)
+  // Start Zone
   pathPolygons.push([
-    {x: x - zoneWidth/2, y: y + 40},
-    {x: x + zoneWidth/2, y: y + 40},
-    {x: x + zoneWidth/2, y: y - 40},
-    {x: x - zoneWidth/2, y: y - 40}
+    {x:x-zoneWidth/2,y:y+40},{x:x+zoneWidth/2,y:y+40},{x:x+zoneWidth/2,y:y-40},{x:x-zoneWidth/2,y:y-40}
   ]);
 
-  for (let i = 0; i < 6; i++) {
-    // Vertical segment
-    const ny = y - segmentHeight;
+  for(let i=0;i<6;i++){
+    const ny=y-segmentHeight;
     pathPolygons.push([
-      {x: x - pathWidth/2, y: y},
-      {x: x + pathWidth/2, y: y},
-      {x: x + pathWidth/2, y: ny},
-      {x: x - pathWidth/2, y: ny}
+      {x:x-pathWidth/2,y:y},{x:x+pathWidth/2,y:y},{x:x+pathWidth/2,y:ny},{x:x-pathWidth/2,y:ny}
     ]);
-
-    y = ny;
-
-    // Horizontal turn (left or right)
-    const dir = Math.random() < 0.5 ? -1 : 1;
-    const nx = x + dir * (W * 0.25);
-
+    y=ny;
+    const dir=Math.random()<0.5?-1:1;
+    const nx=x+dir*(W*0.25);
     pathPolygons.push([
-      {x: Math.min(x, nx) - pathWidth/2, y: y - pathWidth/2},
-      {x: Math.max(x, nx) + pathWidth/2, y: y - pathWidth/2},
-      {x: Math.max(x, nx) + pathWidth/2, y: y + pathWidth/2},
-      {x: Math.min(x, nx) - pathWidth/2, y: y + pathWidth/2}
+      {x:Math.min(x,nx)-pathWidth/2,y:y-pathWidth/2},{x:Math.max(x,nx)+pathWidth/2,y:y-pathWidth/2},
+      {x:Math.max(x,nx)+pathWidth/2,y:y+pathWidth/2},{x:Math.min(x,nx)-pathWidth/2,y:y+pathWidth/2}
     ]);
-
-    x = nx;
+    x=nx;
   }
 
-  // --- Final vertical segment to top middle
-  const finalY = 80;
+  // Final vertical to top middle
+  const finalY=80;
   pathPolygons.push([
-    {x: x - pathWidth/2, y: y},
-    {x: x + pathWidth/2, y: y},
-    {x: x + pathWidth/2, y: finalY},
-    {x: x - pathWidth/2, y: finalY}
+    {x:x-pathWidth/2,y:y},{x:x+pathWidth/2,y:y},{x:x+pathWidth/2,y:finalY},{x:x-pathWidth/2,y:finalY}
   ]);
 
-  // --- Finish Zone (larger than path)
-  endZone = { x: W/2, y: 60, r: zoneWidth / 2 };
-
+  // Finish Zone
+  endZone={ x:W/2, y:60, r:zoneWidth/2 };
   pathPolygons.push([
-    {x: W/2 - zoneWidth/2, y: finalY},
-    {x: W/2 + zoneWidth/2, y: finalY},
-    {x: W/2 + zoneWidth/2, y: 10},
-    {x: W/2 - zoneWidth/2, y: 10}
+    {x:W/2-zoneWidth/2,y:finalY},{x:W/2+zoneWidth/2,y:finalY},{x:W/2+zoneWidth/2,y:10},{x:W/2-zoneWidth/2,y:10}
   ]);
 }
 
-function pointInPoly(px, py, poly) {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x, yi = poly[i].y;
-    const xj = poly[j].x, yj = poly[j].y;
-    const intersect = ((yi > py) !== (yj > py)) &&
-      (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
-    if (intersect) inside = !inside;
+function pointInPoly(px,py,poly){
+  let inside=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i].x, yi=poly[i].y, xj=poly[j].x, yj=poly[j].y;
+    const intersect=((yi>py)!==(yj>py)) && (px<(xj-xi)*(py-yi)/(yj-yi)+xi);
+    if(intersect) inside=!inside;
   }
   return inside;
 }
 
-function isBallOnPath() {
-  for (const poly of pathPolygons) {
-    if (pointInPoly(ball.x, ball.y, poly)) return true;
-  }
-  return false;
+function isBallOnPath(){ for(const poly of pathPolygons) if(pointInPoly(ball.x,ball.y,poly)) return true; return false; }
+
+function update(){
+  ball.vx+=tiltX*0.05; ball.vy+=tiltY*0.05;
+  ball.x+=ball.vx; ball.y+=ball.vy;
+
+  if(!isBallOnPath()) resetGame();
+
+  const dx=ball.x-endZone.x, dy=ball.y-endZone.y;
+  if(Math.sqrt(dx*dx+dy*dy)<endZone.r){ score++; scoreEl.textContent=score; resetGame(); }
 }
 
-function update() {
-  const ax = tiltX * 0.05;
-  const ay = tiltY * 0.05;
-
-  ball.vx += ax;
-  ball.vy += ay;
-  ball.x += ball.vx;
-  ball.y += ball.vy;
-
-  if (!isBallOnPath()) {
-    resetGame();
-  }
-
-  const dx = ball.x - endZone.x;
-  const dy = ball.y - endZone.y;
-  if (Math.sqrt(dx*dx + dy*dy) < endZone.r) {
-    score++;
-    scoreEl.textContent = score;
-    resetGame();
+function drawPath(){
+  ctx.strokeStyle='#0f0'; ctx.lineWidth=2; ctx.fillStyle='#333';
+  for(const poly of pathPolygons){
+    ctx.beginPath(); ctx.moveTo(poly[0].x,poly[0].y);
+    for(let i=1;i<poly.length;i++) ctx.lineTo(poly[i].x,poly[i].y);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
   }
 }
 
-function drawPath() {
-  ctx.strokeStyle = '#00ff66';
-  ctx.lineWidth = 2;
-  ctx.fillStyle = '#333';
+function drawBall(){ ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2); ctx.stroke(); }
 
-  for (const poly of pathPolygons) {
-    ctx.beginPath();
-    ctx.moveTo(poly[0].x, poly[0].y);
-    for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-}
+function drawEnd(){ ctx.strokeStyle='#0f0'; ctx.beginPath(); ctx.arc(endZone.x,endZone.y,endZone.r,0,Math.PI*2); ctx.stroke(); }
 
-function drawBall() {
-  ctx.strokeStyle = '#fff';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
-  ctx.stroke();
-}
+function render(){ ctx.clearRect(0,0,W,H); drawPath(); drawEnd(); drawBall(); }
 
-function drawEnd() {
-  ctx.strokeStyle = '#00ff66';
-  ctx.beginPath();
-  ctx.arc(endZone.x, endZone.y, endZone.r, 0, Math.PI * 2);
-  ctx.stroke();
-}
+function loop(){ update(); render(); requestAnimationFrame(loop); }
 
-function render() {
-  ctx.clearRect(0, 0, W, H);
-  drawPath();
-  drawEnd();
-  drawBall();
-}
+function resetGame(){ ball=createBall(); generatePath(); }
 
-function loop() {
-  update();
-  render();
-  requestAnimationFrame(loop);
-}
-
-function resetGame() {
-  ball = createBall();
-  generatePath();
-}
-
-window.addEventListener('keydown', e => {
-  if (e.key.toLowerCase() === 'd') debug = !debug;
-});
-
-resetGame();
-loop();
+window.addEventListener('keydown',e=>{ if(e.key.toLowerCase()==='d') debug=!debug; });
+resetGame(); loop();
 </script>
 </body>
 </html>
