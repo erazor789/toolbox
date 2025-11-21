@@ -101,27 +101,65 @@ function createBall() {
 function generatePath() {
   pathPolygons = [];
 
-  const segments = 10;
-  const width = W * 0.25;
-  let x = W / 2;
-  let y = H - 100;
+  const pathWidth = W * 0.18;
+  const zoneWidth = pathWidth * 1.8;
+  const segmentHeight = H / 8;
 
-  for (let i = 0; i < segments; i++) {
-    let nx = x + (Math.random() * 200 - 100);
-    let ny = y - (H / segments);
+  let x = W / 2;
+  let y = H - 140;
+
+  // --- Start Zone (larger platform)
+  pathPolygons.push([
+    {x: x - zoneWidth/2, y: y + 40},
+    {x: x + zoneWidth/2, y: y + 40},
+    {x: x + zoneWidth/2, y: y - 40},
+    {x: x - zoneWidth/2, y: y - 40}
+  ]);
+
+  for (let i = 0; i < 6; i++) {
+    // Vertical segment
+    const ny = y - segmentHeight;
+    pathPolygons.push([
+      {x: x - pathWidth/2, y: y},
+      {x: x + pathWidth/2, y: y},
+      {x: x + pathWidth/2, y: ny},
+      {x: x - pathWidth/2, y: ny}
+    ]);
+
+    y = ny;
+
+    // Horizontal turn (left or right)
+    const dir = Math.random() < 0.5 ? -1 : 1;
+    const nx = x + dir * (W * 0.25);
 
     pathPolygons.push([
-      {x: x - width/2, y: y},
-      {x: x + width/2, y: y},
-      {x: nx + width/2, y: ny},
-      {x: nx - width/2, y: ny}
+      {x: Math.min(x, nx) - pathWidth/2, y: y - pathWidth/2},
+      {x: Math.max(x, nx) + pathWidth/2, y: y - pathWidth/2},
+      {x: Math.max(x, nx) + pathWidth/2, y: y + pathWidth/2},
+      {x: Math.min(x, nx) - pathWidth/2, y: y + pathWidth/2}
     ]);
 
     x = nx;
-    y = ny;
   }
 
-  endZone = { x: x, y: y - 20, r: 30 };
+  // --- Final vertical segment to top middle
+  const finalY = 80;
+  pathPolygons.push([
+    {x: x - pathWidth/2, y: y},
+    {x: x + pathWidth/2, y: y},
+    {x: x + pathWidth/2, y: finalY},
+    {x: x - pathWidth/2, y: finalY}
+  ]);
+
+  // --- Finish Zone (larger than path)
+  endZone = { x: W/2, y: 60, r: zoneWidth / 2 };
+
+  pathPolygons.push([
+    {x: W/2 - zoneWidth/2, y: finalY},
+    {x: W/2 + zoneWidth/2, y: finalY},
+    {x: W/2 + zoneWidth/2, y: 10},
+    {x: W/2 - zoneWidth/2, y: 10}
+  ]);
 }
 
 function pointInPoly(px, py, poly) {
