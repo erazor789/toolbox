@@ -5,24 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Retro Vector Tilt Path Game</title>
 <style>
-  :root{
-    --bg: #000;
-    --retro: #0f0;
-    --ui: #0f0;
-    --btn: #0f62fe;
-    --text: #0f0;
-  }
   html,body{
-    height:100%;
     margin:0;
-    background:var(--bg);
-    color:var(--text);
+    background:#000;
+    color:#0f0;
     font-family: monospace;
-    -webkit-user-select:none;
-    user-select:none;
+    height:100%;
+    overflow:hidden;
   }
-  canvas{ display:block; width:100vw; height:100vh; background:var(--bg); }
-  /* Bottom UI container */
+
+  canvas{
+    display:block;
+    width:100vw;
+    height:100vh;
+    background:#000;
+  }
+
   .ui {
     position: fixed;
     left: 0;
@@ -30,295 +28,171 @@
     bottom: 0;
     padding: 8px 12px;
     display:flex;
-    gap:12px;
-    align-items:center;
     justify-content:space-between;
-    pointer-events: none;
-    color: var(--ui);
-    font-size: 16px;
+    align-items:center;
+    font-size:14px;
   }
-  .ui .left, .ui .center, .ui .right { pointer-events: auto; }
-  #debugToggle, #restartBtn { background:transparent; border:1px solid var(--ui); color:var(--ui); padding:6px 10px; border-radius:6px; cursor:pointer; }
+
+  button{
+    background:transparent;
+    color:#0f0;
+    border:1px solid #0f0;
+    padding:6px 10px;
+    border-radius:6px;
+    font-family: monospace;
+  }
+
   #startBtn{
     position: fixed;
     left:50%;
     top:50%;
     transform:translate(-50%,-50%);
-    z-index:20;
-    font-size:18px;
-    padding:12px 18px;
-    border-radius:8px;
-    border:none;
-    background:var(--btn);
-    color:white;
+    padding:14px 20px;
+    background:#111;
+    border:1px solid #0f0;
   }
+
   #endPanel{
     position: fixed;
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: 60px;
-    background: rgba(0,0,0,0.6);
-    border: 1px solid var(--ui);
-    padding:12px 16px;
-    border-radius:8px;
+    bottom:70px;
+    left:50%;
+    transform:translateX(-50%);
+    padding:12px;
+    border:1px solid #0f0;
+    background:rgba(0,0,0,0.7);
     display:none;
-    color:var(--ui);
-    text-align:center;
   }
-  #endPanel button {
-    margin-top:8px;
-    padding:8px 12px;
-    border-radius:6px;
-    border:none;
-    background:var(--btn);
-    color:white;
-    cursor:pointer;
-  }
-  #debugInfo { font-size:13px; color: #afa; }
 </style>
 </head>
 <body>
+
 <canvas id="canvas"></canvas>
+<button id="startBtn">START</button>
 
-<!-- Start Button (must tap to enable gyro on many phones) -->
-<button id="startBtn">Start Game</button>
-
-<!-- Bottom UI -->
 <div class="ui">
-  <div class="left">
-    <button id="debugToggle">Debug: ON</button>
-  </div>
-  <div class="center">
-    <div id="counter">Mazes Completed: 0</div>
-  </div>
-  <div class="right">
-    <div id="debugInfo">tiltX: 0.00 tiltY: 0.00</div>
-  </div>
+  <div><button id="debugToggle">Debug: ON</button></div>
+  <div id="counter">Mazes Completed: 0</div>
+  <div id="debugInfo"></div>
 </div>
 
-<!-- End panel (bottom) -->
 <div id="endPanel">
   <div id="endText">Out of bounds</div>
-  <div id="endScore">Mazes Completed: 0</div>
   <button id="restartBtn">Restart</button>
 </div>
 
 <script>
-/* ---------- Configuration ---------- */
-const GRID = 9;                     // grid resolution (path nodes)
-let corridorWidth;                  // px (computed)
-let startPlatformExtra = 1.5;       // multiplier for start platform radius
-let ballDiameterFactor = 0.6;       // ball diameter relative to cell size
-const tiltAccel = 2.5;              // tilt acceleration multiplier
-const friction = 0.85;              // velocity damping
-const maxSpeedFactor = 0.3;         // fraction of cellSize
-
-/* ---------- Canvas & state ---------- */
 const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d', { alpha: false });
-let W = 0, H = 0, cellSize = 0;
-let ball = { x:0, y:0, vx:0, vy:0, r:0 };
-let path = [];          // grid cells: [{x,y},...]
-let pathPoints = [];    // center points: [{x,y},...]
-let tiltX = 0, tiltY = 0;
-let completed = 0;
-let debugOn = true;
-let running = false;
+const ctx = canvas.getContext('2d');
 
-/* UI elements */
-const startBtn = document.getElementById('startBtn');
-const debugToggle = document.getElementById('debugToggle');
-const counterEl = document.getElementById('counter');
-const debugInfo = document.getElementById('debugInfo');
-const endPanel = document.getElementById('endPanel');
-const endText = document.getElementById('endText');
-const endScore = document.getElementById('endScore');
-const restartBtn = document.getElementById('restartBtn');
+let W,H,cellSize;
+const GRID = 9;
+let corridorWidth;
+let ball = {x:0,y:0,vx:0,vy:0,r:0};
+let path=[], pathPoints=[];
+let tiltX=0, tiltY=0;
+let completed=0;
+let running=false;
+let debugOn=true;
 
-/* ---------- Utilities ---------- */
 function resize(){
-  W = window.innerWidth;
-  H = window.innerHeight;
-  canvas.width = W;
-  canvas.height = H;
-  cellSize = Math.min(W, H) / GRID;
-  corridorWidth = cellSize * 0.9; // thick corridor
-  ball.r = (cellSize * ballDiameterFactor) / 2;
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  cellSize = Math.min(W,H)/GRID;
+  corridorWidth = cellSize * 0.85;
+  ball.r = cellSize * 0.3;
 }
-window.addEventListener('resize', ()=>{
-  resize();
-  if(path.length) buildPathPoints();
-  draw(); // immediate redraw
-});
 resize();
+window.onresize = resize;
 
-/* Distance from point P to segment AB */
-function pointToSegmentDistance(px,py, ax,ay, bx,by){
-  const vx = bx-ax, vy = by-ay;
-  const wx = px-ax, wy = py-ay;
-  const c1 = vx*wx + vy*wy;
-  if (c1 <= 0) return Math.hypot(px-ax, py-ay);
-  const c2 = vx*vx + vy*vy;
-  if (c2 <= c1) return Math.hypot(px-bx, py-by);
-  const t = c1 / c2;
-  const projx = ax + t*vx, projy = ay + t*vy;
-  return Math.hypot(px-projx, py-projy);
-}
-
-/* ---------- Path generation (strict H/V moves) ---------- */
 function generatePath(){
-  path = [];
-  let x = 0, y = 0;
+  path=[];
+  let x=0,y=0;
   path.push({x,y});
-  while(x < GRID-1 || y < GRID-1){
-    if(x < GRID-1 && y < GRID-1){
-      if(Math.random() < 0.5) x++; else y++;
-    } else if (x < GRID-1) x++;
-    else y++;
+  while(x<GRID-1||y<GRID-1){
+    if(Math.random()<0.5 && x<GRID-1) x++;
+    else if(y<GRID-1) y++;
     path.push({x,y});
   }
-  buildPathPoints();
-  placeBallAtStart();
-}
-
-/* Convert cell centers to pixel coordinates */
-function buildPathPoints(){
-  pathPoints = path.map(c => ({
-    x: c.x*cellSize + cellSize/2,
-    y: c.y*cellSize + cellSize/2
+  pathPoints = path.map(c=>({
+    x:c.x*cellSize+cellSize/2,
+    y:c.y*cellSize+cellSize/2
   }));
+  ball.x = pathPoints[0].x;
+  ball.y = pathPoints[0].y;
+  ball.vx=ball.vy=0;
 }
 
-/* Starting platform center/radius */
-function startPlatform(){
-  const p = pathPoints[0];
-  const r = (corridorWidth/2) * startPlatformExtra;
-  return { x: p.x, y: p.y, r };
+function distToSegment(px,py,ax,ay,bx,by){
+  const vx=bx-ax, vy=by-ay;
+  const wx=px-ax, wy=py-ay;
+  const c1=vx*wx+vy*wy;
+  if(c1<=0) return Math.hypot(px-ax,py-ay);
+  const c2=vx*vx+vy*vy;
+  if(c2<=c1) return Math.hypot(px-bx,py-by);
+  const t=c1/c2;
+  return Math.hypot(px-(ax+t*vx), py-(ay+t*vy));
 }
 
-/* Place ball at center of first cell (within start platform) */
-function placeBallAtStart(){
-  const sp = startPlatform();
-  ball.x = sp.x;
-  ball.y = sp.y;
-  ball.vx = 0; ball.vy = 0;
-}
-
-/* ---------- Collision / on-path check ----------
-   Ball center is considered on-path if:
-   - It's within start platform OR
-   - Its distance to any segment joining consecutive pathPoints <= corridorHalf - epsilon
-*/
-function isBallOnPath(){
-  const half = corridorWidth / 2;
-  // start platform check
-  const sp = startPlatform();
-  if (Math.hypot(ball.x - sp.x, ball.y - sp.y) <= sp.r) return true;
-  // distance to polyline segments
+function isOnPath(){
+  const limit=corridorWidth/2;
   for(let i=0;i<pathPoints.length-1;i++){
-    const a = pathPoints[i], b = pathPoints[i+1];
-    const d = pointToSegmentDistance(ball.x, ball.y, a.x, a.y, b.x, b.y);
-    if (d <= half) return true;
+    const a=pathPoints[i], b=pathPoints[i+1];
+    if(distToSegment(ball.x,ball.y,a.x,a.y,b.x,b.y)<=limit) return true;
   }
   return false;
 }
 
-/* Distance to nearest segment (for debug) */
-function nearestDistanceToPath(){
-  let minD = Infinity;
-  const sp = startPlatform();
-  minD = Math.min(minD, Math.hypot(ball.x - sp.x, ball.y - sp.y) - sp.r);
-  for(let i=0;i<pathPoints.length-1;i++){
-    const a = pathPoints[i], b = pathPoints[i+1];
-    const d = pointToSegmentDistance(ball.x, ball.y, a.x, a.y, b.x, b.y) - corridorWidth/2;
-    if (d < minD) minD = d;
-  }
-  return minD; // negative means inside corridor, positive means outside by that px
-}
-
-/* ---------- Update / Draw / Loop ---------- */
 function update(){
-  // apply tilt acceleration
-  ball.vx += tiltX * tiltAccel;
-  ball.vy += tiltY * tiltAccel;
+  ball.vx += tiltX*2;
+  ball.vy += tiltY*2;
+  ball.vx*=0.9;
+  ball.vy*=0.9;
+  ball.x+=ball.vx;
+  ball.y+=ball.vy;
 
-  const maxSpeed = cellSize * maxSpeedFactor;
-  ball.vx = Math.max(-maxSpeed, Math.min(maxSpeed, ball.vx));
-  ball.vy = Math.max(-maxSpeed, Math.min(maxSpeed, ball.vy));
-
-  ball.x += ball.vx;
-  ball.y += ball.vy;
-
-  // friction
-  ball.vx *= friction;
-  ball.vy *= friction;
-
-  // keep ball inside screen bounds (center)
-  ball.x = Math.max(ball.r, Math.min(W - ball.r, ball.x));
-  ball.y = Math.max(ball.r, Math.min(H - ball.r, ball.y));
-
-  // check out-of-bounds: if the center of the ball goes beyond corridor edge -> game over
-  if(!isBallOnPath()){
-    endGame();
-  }
-
-  // check finish (center near last point within corridor width/2)
-  const finish = pathPoints[pathPoints.length - 1];
-  const distFinish = Math.hypot(ball.x - finish.x, ball.y - finish.y);
-  if (distFinish <= corridorWidth/2){
-    completed++;
-    counterEl.textContent = `Mazes Completed: ${completed}`;
-    generatePath();
+  if(!isOnPath()){
+    running=false;
+    document.getElementById('endPanel').style.display='block';
   }
 }
 
 function draw(){
   ctx.clearRect(0,0,W,H);
 
-  // retro green thick polyline (stroke with wide lineWidth)
-  ctx.strokeStyle = '#0f0';
+  // DARK GRAY PATH FILL
+  ctx.strokeStyle = "#333";
   ctx.lineWidth = corridorWidth;
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
+  ctx.lineCap="round";
   ctx.beginPath();
-  for(let i=0;i<pathPoints.length;i++){
-    const p = pathPoints[i];
-    if(i === 0) ctx.moveTo(p.x, p.y);
-    else ctx.lineTo(p.x, p.y);
-  }
+  pathPoints.forEach((p,i)=>{
+    if(i===0) ctx.moveTo(p.x,p.y);
+    else ctx.lineTo(p.x,p.y);
+  });
   ctx.stroke();
 
-  // draw start platform as an extra width ring (outline)
-  const sp = startPlatform();
-  ctx.strokeStyle = '#0f0';
-  ctx.lineWidth = 2;
+  // GREEN VECTOR OUTLINES
+  ctx.strokeStyle="#0f0";
+  ctx.lineWidth=2;
   ctx.beginPath();
-  ctx.arc(sp.x, sp.y, sp.r, 0, Math.PI*2);
+  pathPoints.forEach((p,i)=>{
+    if(i===0) ctx.moveTo(p.x,p.y);
+    else ctx.lineTo(p.x,p.y);
+  });
   ctx.stroke();
 
-  // draw finish circle outline
-  const finish = pathPoints[pathPoints.length - 1];
+  // BALL OUTLINE
+  ctx.strokeStyle="#fff";
+  ctx.lineWidth=2;
   ctx.beginPath();
-  ctx.arc(finish.x, finish.y, corridorWidth/2, 0, Math.PI*2);
+  ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
   ctx.stroke();
 
-  // draw ball as outline only
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = '#fff';
-  ctx.beginPath();
-  ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI*2);
-  ctx.stroke();
-
-  // debug overlay bottom-right or bottom-left text (also in UI)
   if(debugOn){
-    const d = nearestDistanceToPath();
-    debugInfo.textContent = `tiltX: ${tiltX.toFixed(2)} tiltY: ${tiltY.toFixed(2)}  |  ball: ${ball.x.toFixed(0)},${ball.y.toFixed(0)}  |  nearest: ${d.toFixed(1)}px`;
-  } else {
-    debugInfo.textContent = '';
+    document.getElementById('debugInfo').textContent =
+      `tiltX:${tiltX.toFixed(2)} tiltY:${tiltY.toFixed(2)}`;
   }
 }
 
-/* main loop */
 function loop(){
   if(!running) return;
   update();
@@ -326,84 +200,27 @@ function loop(){
   requestAnimationFrame(loop);
 }
 
-/* ---------- End / Restart ---------- */
-function endGame(){
-  running = false;
-  endPanel.style.display = 'block';
-  endText.textContent = 'Out of bounds';
-  endScore.textContent = `Mazes Completed: ${completed}`;
-}
-
-/* ---------- Input & Permission Handling ---------- */
-function startGyroAndGame(){
-  // request permission on iOS; on Android the user-gesture allows events
-  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-    DeviceOrientationEvent.requestPermission().then(res=>{
-      if(res === 'granted'){
-        window.addEventListener('deviceorientation', onDeviceOrientation);
-        begin();
-      } else {
-        alert('Gyroscope permission denied.');
-      }
-    }).catch(err=>{
-      // fallback: still attach listener
-      window.addEventListener('deviceorientation', onDeviceOrientation);
-      begin();
-    });
-  } else {
-    // Android / other: attach after user gesture
-    window.addEventListener('deviceorientation', onDeviceOrientation);
-    begin();
-  }
-}
-
-/* Device orientation handler */
-function onDeviceOrientation(e){
-  // e.gamma: left-right [-90,90], e.beta: front-back [-180,180]
-  // normalize to approx [-1,1]
-  tiltX = (e.gamma === null ? 0 : e.gamma / 90);
-  tiltY = (e.beta === null ? 0 : e.beta / 90);
-}
-
-/* Boot the game loop & hide UI overlays */
-function begin(){
-  startBtn.style.display = 'none';
-  endPanel.style.display = 'none';
-  running = true;
+function startGame(){
+  window.addEventListener("deviceorientation", e=>{
+    tiltX = (e.gamma||0)/45;
+    tiltY = (e.beta||0)/45;
+  });
   generatePath();
+  running=true;
   loop();
+  document.getElementById('startBtn').style.display='none';
 }
 
-/* ---------- UI handlers ---------- */
-debugToggle.addEventListener('click', ()=>{
-  debugOn = !debugOn;
-  debugToggle.textContent = `Debug: ${debugOn ? 'ON' : 'OFF'}`;
-});
-
-startBtn.addEventListener('click', startGyroAndGame);
-
-restartBtn.addEventListener('click', ()=>{
-  endPanel.style.display = 'none';
-  completed = 0;
-  counterEl.textContent = `Mazes Completed: ${completed}`;
+document.getElementById('startBtn').onclick=startGame;
+document.getElementById('restartBtn').onclick=()=>{
+  document.getElementById('endPanel').style.display='none';
   generatePath();
-  running = true;
+  running=true;
   loop();
-});
-
-/* allow 'D' key toggle (for desktop test) */
-document.addEventListener('keydown', (e)=>{
-  if(e.key === 'd' || e.key === 'D'){
-    debugOn = !debugOn;
-    debugToggle.textContent = `Debug: ${debugOn ? 'ON' : 'OFF'}`;
-  }
-});
-
-/* ---------- Start in idle visual state ---------- */
-// generate an initial path and draw it so user sees layout before starting
-generatePath();
-draw();
-
+};
+document.getElementById('debugToggle').onclick=()=>{
+  debugOn=!debugOn;
+};
 </script>
 </body>
 </html>
