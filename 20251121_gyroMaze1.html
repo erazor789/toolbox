@@ -33,7 +33,6 @@ let pathPolygons=[],ball,endZone;
 function resize(){ W=canvas.width=window.innerWidth; H=canvas.height=window.innerHeight; }
 window.addEventListener('resize',resize); resize();
 
-// Gyro Handling
 function handleOrientation(e){ tiltX=e.gamma||0; tiltY=e.beta||0; tiltXEl.textContent=tiltX.toFixed(1); tiltYEl.textContent=tiltY.toFixed(1); }
 permissionBtn.addEventListener('click',()=>{
   if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
@@ -45,41 +44,44 @@ function createBall(){ return { r:Math.min(W,H)*0.03, x:W/2, y:H-140, vx:0, vy:0
 
 function generatePath(){
   pathPolygons=[];
-  const pathWidth=W*0.18;
-  const zoneWidth=pathWidth*1.8;
-  const segmentHeight=H/8;
+  const pathSize=Math.min(W,H)*0.15; // perfect square size
+  const zoneSize=pathSize*1.8;
+  const segmentHeight=pathSize; // vertical segment height = path width for square blocks
+
   let x=W/2, y=H-140;
 
   // Start Zone
   pathPolygons.push([
-    {x:x-zoneWidth/2,y:y+40},{x:x+zoneWidth/2,y:y+40},{x:x+zoneWidth/2,y:y-40},{x:x-zoneWidth/2,y:y-40}
+    {x:x-zoneSize/2,y:y+zoneSize/2},{x:x+zoneSize/2,y:y+zoneSize/2},{x:x+zoneSize/2,y:y-zoneSize/2},{x:x-zoneSize/2,y:y-zoneSize/2}
   ]);
 
   for(let i=0;i<6;i++){
+    // Vertical segment
     const ny=y-segmentHeight;
     pathPolygons.push([
-      {x:x-pathWidth/2,y:y},{x:x+pathWidth/2,y:y},{x:x+pathWidth/2,y:ny},{x:x-pathWidth/2,y:ny}
+      {x:x-pathSize/2,y:y},{x:x+pathSize/2,y:y},{x:x+pathSize/2,y:ny},{x:x-pathSize/2,y:ny}
     ]);
     y=ny;
+    // Horizontal turn
     const dir=Math.random()<0.5?-1:1;
-    const nx=x+dir*(W*0.25);
+    const nx=x+dir*pathSize;
     pathPolygons.push([
-      {x:Math.min(x,nx)-pathWidth/2,y:y-pathWidth/2},{x:Math.max(x,nx)+pathWidth/2,y:y-pathWidth/2},
-      {x:Math.max(x,nx)+pathWidth/2,y:y+pathWidth/2},{x:Math.min(x,nx)-pathWidth/2,y:y+pathWidth/2}
+      {x:Math.min(x,nx)-pathSize/2,y:y-pathSize/2},{x:Math.max(x,nx)+pathSize/2,y:y-pathSize/2},
+      {x:Math.max(x,nx)+pathSize/2,y:y+pathSize/2},{x:Math.min(x,nx)-pathSize/2,y:y+pathSize/2}
     ]);
     x=nx;
   }
 
-  // Final vertical to top middle
+  // Final vertical segment to top middle
   const finalY=80;
   pathPolygons.push([
-    {x:x-pathWidth/2,y:y},{x:x+pathWidth/2,y:y},{x:x+pathWidth/2,y:finalY},{x:x-pathWidth/2,y:finalY}
+    {x:x-pathSize/2,y:y},{x:x+pathSize/2,y:y},{x:x+pathSize/2,y:finalY},{x:x-pathSize/2,y:finalY}
   ]);
 
   // Finish Zone
-  endZone={ x:W/2, y:60, r:zoneWidth/2 };
+  endZone={ x:W/2, y:60, r:zoneSize/2 };
   pathPolygons.push([
-    {x:W/2-zoneWidth/2,y:finalY},{x:W/2+zoneWidth/2,y:finalY},{x:W/2+zoneWidth/2,y:10},{x:W/2-zoneWidth/2,y:10}
+    {x:W/2-zoneSize/2,y:finalY},{x:W/2+zoneSize/2,y:finalY},{x:W/2+zoneSize/2,y:10},{x:W/2-zoneSize/2,y:10}
   ]);
 }
 
@@ -96,7 +98,8 @@ function pointInPoly(px,py,poly){
 function isBallOnPath(){ for(const poly of pathPolygons) if(pointInPoly(ball.x,ball.y,poly)) return true; return false; }
 
 function update(){
-  ball.vx+=tiltX*0.05; ball.vy+=tiltY*0.05;
+  const speedFactor = 0.02; // slower ball movement
+  ball.vx+=tiltX*speedFactor; ball.vy+=tiltY*speedFactor;
   ball.x+=ball.vx; ball.y+=ball.vy;
 
   if(!isBallOnPath()) resetGame();
