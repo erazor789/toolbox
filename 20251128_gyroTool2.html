@@ -387,8 +387,8 @@ function drawIndicator(){
   if(mag > 0) scale = Math.min(1, (maxGVal) / mag);
   vx *= scale; vy *= scale;
   // map to pixel offset (x to right, y to up)
-  const pxX = vx * radius / maxGVal;
-  const pxY = -vy * radius / maxGVal;
+  const pxX = -vx * radius / maxGVal;
+  const pxY = vy * radius / maxGVal;
 
   // draw trail (old to new)
   if(meterTrail.length){
@@ -624,3 +624,4 @@ function exportCSV(list){
 </script>
 </body>
 </html>
+
