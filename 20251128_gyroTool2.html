@@ -391,18 +391,18 @@ function drawIndicator(){
   const pxY = vy * radius / maxGVal;
 
   // draw trail (old to new)
-  if(meterTrail.length){
-    for(let i=0;i<meterTrail.length;i++){
-      const item = meterTrail[i];
-      const tscale = i / meterTrail.length;
-      const tx = (item.ax / 9.80665) * radius / maxGVal;
-      const ty = -(item.ay / 9.80665) * radius / maxGVal;
-      ctx.beginPath();
-      ctx.fillStyle = `rgba(80,160,255,${0.08 + 0.6 * tscale})`;
-      ctx.arc(cx + tx, cy + ty, (2 + (refs.ballSize.value*0.08)) * px * (0.5 + tscale*0.8), 0, Math.PI*2);
-      ctx.fill();
-    }
+if(meterTrail.length){
+  for(let i=0;i<meterTrail.length;i++){
+    const item = meterTrail[i];
+    const tscale = i / meterTrail.length;
+    const tx = -(item.ax / 9.80665) * radius / maxGVal; // X reversed
+    const ty = -(item.ay / 9.80665) * radius / maxGVal;
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(80,160,255,${0.08 + 0.6 * tscale})`;
+    ctx.arc(cx + tx, cy + ty, (2 + (refs.ballSize.value*0.08)) * px * (0.5 + tscale*0.8), 0, Math.PI*2);
+    ctx.fill();
   }
+}
 
   // ball color based on g magnitude
   const intensity = Math.min(1, g / maxGVal);
@@ -624,4 +624,5 @@ function exportCSV(list){
 </script>
 </body>
 </html>
+
 
