@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Gyro & G-Force — Standalone</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#111316; --muted:#9aa4b2; --accent:#29b6f6; --good:#4caf50;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, 'Roboto Mono', monospace;
+  }
+  html,body{height:100%;margin:0;background:linear-gradient(180deg,#070809,#0c1014);color:#e6eef6;font-family:Inter,system-ui,Arial}
+  .app{display:flex;flex-direction:column;min-height:100vh;padding:10px;gap:10px}
+  header{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .title{font-weight:700;font-size:16px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap}
+  button,select{background:linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));border:0;color:var(--text);padding:8px 10px;border-radius:10px;font-weight:600}
+  button{color:#fff}
+  .btn-prim{background:#1f9bf0}
+  .btn-warn{background:#ff8a65}
+  .top-row{display:flex;gap:12px;align-items:center}
+  main{display:grid;grid-template-columns:1fr;gap:10px;flex:1;align-content:start}
+  .panel{background:var(--panel);padding:12px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,0.45)}
+  .raw-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;font-family:var(--mono);font-size:14px}
+  .raw-cell{background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;display:flex;justify-content:space-between;align-items:center}
+  .raw-label{color:var(--muted);font-size:12px}
+  .raw-value{font-size:16px;font-weight:700}
+  .meter-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+  #meter{width:100%;max-width:360px;height:auto}
+  .graph-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .graph-wrap{height:220px;border-radius:8px;overflow:hidden;background:linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));display:block}
+  canvas.graph{width:100%;height:100%;display:block}
+  footer{font-size:12px;color:var(--muted);text-align:center;padding:6px}
+  .small{font-size:12px;color:var(--muted)}
+  .flex{display:flex;gap:8px;align-items:center}
+  .toggle{background:transparent;border:1px solid rgba(255,255,255,0.03);padding:6px 8px;border-radius:8px;color:var(--accent)}
+  .config{display:flex;gap:8px;align-items:center}
+  @media(min-width:720px){main{grid-template-columns:420px 1fr;align-items:start} .raw-grid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+  <div class="app" id="app">
+    <header>
+      <div class="top-row">
+        <div class="title">Gyro &amp; G-Force — Standalone (single file)</div>
+        <div class="small">No servers · Offline-capable · Mobile-first</div>
+      </div>
+
+      <div class="controls">
+        <button id="btn-perm" class="btn-prim">Enable Sensors</button>
+        <button id="btn-record" class="btn-prim">Start Recording</button>
+        <button id="btn-clear">Clear Data</button>
+        <button id="btn-export" class="btn-warn">Export CSV</button>
+        <button id="btn-full">Fullscreen</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- LEFT COLUMN: RAW + METER -->
+      <section class="panel" id="left">
+        <h3 style="margin:0 0 8px 0">Live Readouts</h3>
+
+        <div class="raw-grid" style="margin-bottom:10px">
+          <div class="raw-cell"><div><div class="raw-label">Accel X (m/s²)</div><div class="raw-value" id="acc-x">—</div></div></div>
+          <div class="raw-cell"><div><div class="raw-label">Accel Y (m/s²)</div><div class="raw-value" id="acc-y">—</div></div></div>
+          <div class="raw-cell"><div><div class="raw-label">Accel Z (m/s²)</div><div class="raw-value" id="acc-z">—</div></div></div>
+          <div class="raw-cell"><div><div class="raw-label">Total G (g)</div><div class="raw-value" id="g-total">—</div></div></div>
+
+          <div class="raw-cell"><div><div class="raw-label">Rot α (°/s)</div><div class="raw-value" id="rot-a">—</div></div></div>
+          <div class="raw-cell"><div><div class="raw-label">Rot β (°/s)</div><div class="raw-value" id="rot-b">—</div></div></div>
+          <div class="raw-cell"><div><div class="raw-label">Rot γ (°/s)</div><div class="raw-value" id="rot-g">—</div></div></div>
+          <div class="raw-cell"><div><div class="raw-label">Hz (approx)</div><div class="raw-value" id="hz">—</div></div></div>
+
+          <div class="raw-cell" style="grid-column:span 2"><div style="width:100%;display:flex;justify-content:space-between;align-items:center">
+            <div><div class="raw-label">Orientation α/β/γ (°)</div>
+              <div style="font-family:var(--mono);font-weight:700" id="orient">— / — / —</div></div>
+            <div style="text-align:right">
+              <div class="small">Baseline</div>
+              <div id="baseline-display" class="small">0 / 0 / 0</div>
+              <button id="btn-reset-baseline" class="toggle" style="margin-top:6px">Reset Orientation</button>
+            </div>
+          </div></div>
+        </div>
+
+        <div class="meter-wrap">
+          <h4 style="margin:0 0 6px 0">G-Force Meter</h4>
+          <canvas id="meter" width="360" height="360" role="img" aria-label="G-Force meter"></canvas>
+          <div class="config small" style="margin-top:6px">
+            <label class="small">Max g:
+              <select id="max-g">
+                <option>3</option><option selected>5</option><option>10</option>
+              </select>
+            </label>
+            <label class="small">Damping:
+              <select id="damping"><option>0.9</option><option selected>0.96</option><option>0.99</option></select>
+            </label>
+            <div style="margin-left:auto" class="small">Peak: <span id="meter-peak">0.00 g</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RIGHT COLUMN: GRAPHS -->
+      <section class="panel" id="right">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <h3 style="margin:0">Graphs & Controls</h3>
+          <div class="graph-controls">
+            <button id="toggle-acc" class="toggle">Toggle Accel Graph</button>
+            <button id="toggle-rot" class="toggle">Toggle Rot Graph</button>
+            <label class="small">Window:
+              <select id="time-window"><option value="5">5s</option><option value="10" selected>10s</option><option value="30">30s</option></select>
+            </label>
+          </div>
+        </div>
+
+        <div style="margin-bottom:8px">
+          <div id="accel-graph" class="graph-wrap">
+            <canvas id="canvas-accel" class="graph"></canvas>
+          </div>
+        </div>
+
+        <div>
+          <div id="rot-graph" class="graph-wrap">
+            <canvas id="canvas-rot" class="graph"></canvas>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <div class="small">Recording: <strong id="rec-ind">OFF</strong></div>
+          <div style="margin-left:auto" class="small">Points in buffer: <span id="buf-count">0</span></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="small">Open this file directly on your phone. iOS: press <strong>Enable Sensors</strong> and accept. Data stays client-side; export to CSV downloads locally.</div>
+    </footer>
+  </div>
+
+<script>
+/*
+  Gyro & G-Force — Single-file standalone tool
+  - Uses DeviceMotionEvent & DeviceOrientationEvent
+  - Displays raw numbers, g-force radial meter, collapsible real-time graphs
+  - Start/Stop recording, Export CSV, Clear data, Fullscreen, Reset orientation baseline
+  - All client-side, no libs, optimized for mobile
+*/
+
+/* -----------------------
+   Utilities & DOM refs
+   ----------------------- */
+const $ = id => document.getElementById(id);
+
+const refs = {
+  accX: $('acc-x'), accY: $('acc-y'), accZ: $('acc-z'),
+  gTotal: $('g-total'),
+  rotA: $('rot-a'), rotB: $('rot-b'), rotG: $('rot-g'),
+  hz: $('hz'),
+  orient: $('orient'),
+  baselineDisplay: $('baseline-display'),
+  btnPerm: $('btn-perm'),
+  btnRecord: $('btn-record'),
+  btnClear: $('btn-clear'),
+  btnExport: $('btn-export'),
+  btnFull: $('btn-full'),
+  btnResetBaseline: $('btn-reset-baseline'),
+  meterCanvas: $('meter'),
+  maxG: $('max-g'),
+  damping: $('damping'),
+  meterPeakDisplay: $('meter-peak'),
+  toggleAcc: $('toggle-acc'),
+  toggleRot: $('toggle-rot'),
+  accelGraphWrap: $('accel-graph'),
+  rotGraphWrap: $('rot-graph'),
+  canvasAccel: $('canvas-accel'),
+  canvasRot: $('canvas-rot'),
+  timeWindowSelect: $('time-window'),
+  recInd: $('rec-ind'),
+  bufCount: $('buf-count')
+};
+
+/* -----------------------
+   State
+   ----------------------- */
+let running = false;
+let recording = false;
+let lastTimestamp = null;
+let sampleHz = 0;
+let sensorBuffer = []; // circular-ish buffer of points
+const MAX_BUFFER = 20000; // safety cap
+let recordData = [];
+let baseline = { alpha:0, beta:0, gamma:0, set:false };
+let meterPeak = 0;
+
+/* Each point: {t:ms, ax, ay, az, g, rAlpha, rBeta, rGamma, orientA, orientB, orientG} */
+
+/* -----------------------
+   Permission & sensors
+   ----------------------- */
+async function requestSensors(){
+  try{
+    // iOS permission flow
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      const res = await DeviceMotionEvent.requestPermission();
+      if (res !== 'granted') throw new Error('Permission not granted');
+    }
+    // start
+    startSensors();
+    refs.btnPerm.textContent = 'Sensors Enabled';
+    refs.btnPerm.disabled = true;
+  } catch(err){
+    alert('Sensor permission failed: ' + (err && err.message ? err.message : err));
+  }
+}
+
+function startSensors(){
+  if (running) return;
+  window.addEventListener('devicemotion', onDeviceMotion, {passive:true});
+  window.addEventListener('deviceorientation', onDeviceOrientation, {passive:true});
+  running = true;
+  lastTimestamp = null;
+  animate(); // start draw loop
+}
+
+function stopSensors(){
+  if(!running) return;
+  window.removeEventListener('devicemotion', onDeviceMotion);
+  window.removeEventListener('deviceorientation', onDeviceOrientation);
+  running = false;
+}
+
+/* -----------------------
+   Sensor handlers
+   ----------------------- */
+function onDeviceMotion(e){
+  const now = Date.now();
+  if(lastTimestamp){
+    const dt = (now - lastTimestamp)/1000;
+    if(dt>0) sampleHz = Math.round(1/dt);
+  }
+  lastTimestamp = now;
+
+  // Some browsers supply acceleration directly; use acceleration (excluding gravity) if present, else fallback to includingGravity
+  const a = e.acceleration || e.accelerationIncludingGravity || {x:0,y:0,z:0};
+  const rot = e.rotationRate || {alpha:0,beta:0,gamma:0};
+
+  const ax = (a.x ?? 0);
+  const ay = (a.y ?? 0);
+  const az = (a.z ?? 0);
+
+  const grav = 9.80665;
+  const g = Math.sqrt(ax*ax + ay*ay + az*az) / grav;
+
+  // orientation will be set by deviceorientation event; include last known orientation
+  const orient = lastOrientation || {alpha:0,beta:0,gamma:0};
+
+  const point = {
+    t: now, ax, ay, az, g,
+    rAlpha: rot.alpha ?? 0, rBeta: rot.beta ?? 0, rGamma: rot.gamma ?? 0,
+    oAlpha: orient.alpha, oBeta: orient.beta, oGamma: orient.gamma
+  };
+
+  // apply baseline offset if set
+  if (baseline.set){
+    point.oAlpha -= baseline.alpha;
+    point.oBeta -= baseline.beta;
+    point.oGamma -= baseline.gamma;
+  }
+
+  sensorBuffer.push(point);
+  if(sensorBuffer.length > MAX_BUFFER) sensorBuffer.shift();
+  refs.bufCount.textContent = sensorBuffer.length;
+
+  if(recording) recordData.push(point);
+
+  // update raw UI quickly
+  updateRawUI(point);
+}
+
+let lastOrientation = null;
+function onDeviceOrientation(e){
+  lastOrientation = {
+    alpha: e.alpha ?? 0,
+    beta: e.beta ?? 0,
+    gamma: e.gamma ?? 0
+  };
+  // Update orientation display immediately (minus baseline if set)
+  const a = lastOrientation.alpha - (baseline.set ? baseline.alpha : 0);
+  const b = lastOrientation.beta - (baseline.set ? baseline.beta : 0);
+  const g = lastOrientation.gamma - (baseline.set ? baseline.gamma : 0);
+  refs.orient.textContent = `${a.toFixed(1)} / ${b.toFixed(1)} / ${g.toFixed(1)}`;
+}
+
+/* -----------------------
+   UI updates
+   ----------------------- */
+function updateRawUI(p){
+  refs.accX.textContent = p.ax.toFixed(3);
+  refs.accY.textContent = p.ay.toFixed(3);
+  refs.accZ.textContent = p.az.toFixed(3);
+  refs.gTotal.textContent = p.g.toFixed(3) + ' g';
+  refs.rotA.textContent = (p.rAlpha ?? 0).toFixed(2);
+  refs.rotB.textContent = (p.rBeta ?? 0).toFixed(2);
+  refs.rotG.textContent = (p.rGamma ?? 0).toFixed(2);
+  refs.hz.textContent = sampleHz || '—';
+}
+
+/* -----------------------
+   Meter drawing
+   ----------------------- */
+const meterCtx = refs.meterCanvas.getContext('2d');
+
+function drawMeter(){
+  const c = refs.meterCanvas;
+  const ctx = meterCtx;
+  // ensure high DPI
+  const px = Math.max(1, window.devicePixelRatio || 1);
+  const size = Math.min(c.clientWidth, 360);
+  c.width = size * px;
+  c.height = size * px;
+  c.style.width = size + 'px';
+  c.style.height = size + 'px';
+
+  const w = c.width, h = c.height;
+  ctx.clearRect(0,0,w,h);
+  const cx = w/2, cy = h/2;
+  const r = Math.min(w,h)/2 - 16*px;
+
+  // ring
+  ctx.lineWidth = 10*px;
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+
+  // ticks and labels (show -90..90 mapping)
+  const maxG = Number(refs.maxG.value) || 5;
+  ctx.save(); ctx.translate(cx,cy);
+  for(let i=0;i<=maxG;i++){
+    // map 0..maxG -> -90..90 degrees (semi-circle)
+    const angle = (-Math.PI/2) + (i/maxG) * Math.PI;
+    const x1 = Math.cos(angle) * r;
+    const y1 = Math.sin(angle) * r;
+    const x2 = Math.cos(angle) * (r - 14*px);
+    const y2 = Math.sin(angle) * (r - 14*px);
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 2*px;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = `${12*px}px ${'monospace'}`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(i + 'g', Math.cos(angle) * (r - 28*px), Math.sin(angle) * (r - 28*px));
+  }
+  ctx.restore();
+
+  // current g (last point)
+  const last = sensorBuffer[sensorBuffer.length-1] || {g:0};
+  const damping = Number(refs.damping.value) || 0.96;
+  meterPeak = Math.max(meterPeak * damping, last.g);
+  refs.meterPeakDisplay.textContent = meterPeak.toFixed(2) + ' g';
+
+  const cur = Math.min(last.g, maxG);
+  // map to angle
+  const ang = (-Math.PI/2) + (cur / maxG) * Math.PI;
+
+  // needle
+  ctx.beginPath();
+  ctx.lineWidth = 6*px;
+  ctx.strokeStyle = '#ffcc00';
+  ctx.moveTo(cx,cy);
+  ctx.lineTo(cx + Math.cos(ang) * (r - 24*px), cy + Math.sin(ang) * (r - 24*px));
+  ctx.stroke();
+
+  // peak marker
+  const pang = (-Math.PI/2) + (Math.min(meterPeak, maxG) / maxG) * Math.PI;
+  ctx.fillStyle = '#ff6b6b';
+  ctx.beginPath(); ctx.arc(cx + Math.cos(pang) * (r - 40*px), cy + Math.sin(pang) * (r - 40*px), 6*px, 0, Math.PI*2); ctx.fill();
+
+  // center cap
+  ctx.fillStyle = '#0b0d10'; ctx.beginPath(); ctx.arc(cx,cy,12*px,0,Math.PI*2); ctx.fill();
+}
+
+/* -----------------------
+   Graph rendering (canvas)
+   ----------------------- */
+const aCtx = refs.canvasAccel.getContext('2d');
+const rCtx = refs.canvasRot.getContext('2d');
+
+function resizeGraphCanvases(){
+  const px = Math.max(1, window.devicePixelRatio || 1);
+  [ {el:refs.canvasAccel, ctx:aCtx}, {el:refs.canvasRot, ctx:rCtx} ].forEach(obj=>{
+    const el = obj.el;
+    const w = el.clientWidth || el.offsetWidth || 400;
+    const h = el.clientHeight || 220;
+    el.width = Math.max(2, w * px);
+    el.height = Math.max(2, h * px);
+  });
+}
+window.addEventListener('resize', resizeGraphCanvases);
+resizeGraphCanvases();
+
+function drawGraph(ctx, el, seriesFuncs, colors, yRange){
+  const w = el.width, h = el.height;
+  ctx.clearRect(0,0,w,h);
+
+  // compute window
+  const winSec = Number(refs.timeWindowSelect.value) || 10;
+  const now = Date.now();
+  const cutoff = now - winSec*1000;
+
+  // background grid line center
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1 * (window.devicePixelRatio || 1);
+  ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+
+  // prepare points for each series
+  seriesFuncs.forEach((f, idx) => {
+    ctx.beginPath();
+    ctx.lineWidth = 2 * (window.devicePixelRatio || 1);
+    ctx.strokeStyle = colors[idx];
+    let started = false;
+    for (let i = 0; i < sensorBuffer.length; i++){
+      const p = sensorBuffer[i];
+      if (p.t < cutoff) continue;
+      const x = ((p.t - cutoff) / (winSec*1000)) * w;
+      const val = f(p);
+      // clamp
+      const y = h - ((val - yRange.min) / (yRange.max - yRange.min)) * h;
+      if (!started){ ctx.moveTo(x,y); started = true; } else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  });
+
+  // optional axis labels: min/max
+  ctx.fillStyle = 'rgba(255,255,255,0.06)';
+  ctx.font = `${12*(window.devicePixelRatio||1)}px ${'monospace'}`;
+  ctx.textAlign = 'right';
+  ctx.fillText(yRange.max.toString(), w - 6*(window.devicePixelRatio||1), 14*(window.devicePixelRatio||1));
+  ctx.fillText(yRange.min.toString(), w - 6*(window.devicePixelRatio||1), h - 6*(window.devicePixelRatio||1));
+}
+
+/* -----------------------
+   Animation loop
+   ----------------------- */
+let animating = false;
+function animate(){
+  if(!running) return;
+  if(!animating){
+    animating = true;
+    (function loop(){
+      if(!running){ animating = false; return; }
+      // draw meter
+      drawMeter();
+      // draw accel graph if visible
+      resizeGraphCanvases();
+      if (refs.accelGraphWrap.style.display !== 'none'){
+        drawGraph(aCtx, refs.canvasAccel,
+          [p => p.ax, p => p.ay, p => p.az],
+          ['rgba(255,80,80,0.95)','rgba(80,220,120,0.95)','rgba(80,160,255,0.95)'],
+          {min:-30, max:30});
+      }
+      if (refs.rotGraphWrap.style.display !== 'none'){
+        drawGraph(rCtx, refs.canvasRot,
+          [p => p.rAlpha, p => p.rBeta, p => p.rGamma],
+          ['rgba(255,160,80,0.95)','rgba(160,255,120,0.95)','rgba(120,180,255,0.95)'],
+          {min:-360, max:360});
+      }
+      requestAnimationFrame(loop);
+    })();
+  }
+}
+
+/* -----------------------
+   Controls
+   ----------------------- */
+refs.btnPerm.addEventListener('click', requestSensors);
+
+refs.btnRecord.addEventListener('click', ()=>{
+  if(!running){ alert('Enable sensors first'); return; }
+  recording = !recording;
+  refs.recInd.textContent = recording ? 'ON' : 'OFF';
+  refs.btnRecord.textContent = recording ? 'Stop Recording' : 'Start Recording';
+  if(recording) recordData = [];
+});
+
+refs.btnClear.addEventListener('click', ()=>{
+  if(confirm('Clear recorded and buffered data?')){
+    sensorBuffer = [];
+    recordData = [];
+    refs.bufCount.textContent = 0;
+    refs.recInd.textContent = recording ? 'ON' : 'OFF';
+  }
+});
+
+refs.btnExport.addEventListener('click', ()=>{
+  if(recordData.length === 0){
+    if(!confirm('No recorded data. Export current buffer instead?')) return;
+    // use sensorBuffer
+    exportCSV(sensorBuffer);
+    return;
+  }
+  exportCSV(recordData);
+});
+
+refs.btnFull.addEventListener('click', async ()=>{
+  try{
+    if(!document.fullscreenElement) await document.documentElement.requestFullscreen();
+    else await document.exitFullscreen();
+  }catch(e){ console.warn('Fullscreen error', e); }
+});
+
+refs.toggleAcc.addEventListener('click', ()=>{
+  const el = refs.accelGraphWrap;
+  el.style.display = (el.style.display === 'none') ? '' : 'none';
+});
+
+refs.toggleRot.addEventListener('click', ()=>{
+  const el = refs.rotGraphWrap;
+  el.style.display = (el.style.display === 'none') ? '' : 'none';
+});
+
+refs.btnResetBaseline.addEventListener('click', ()=>{
+  if(!lastOrientation){ alert('Orientation not yet available. Move device a bit.'); return; }
+  baseline.alpha = lastOrientation.alpha || 0;
+  baseline.beta = lastOrientation.beta || 0;
+  baseline.gamma = lastOrientation.gamma || 0;
+  baseline.set = true;
+  refs.baselineDisplay.textContent = `${baseline.alpha.toFixed(1)} / ${baseline.beta.toFixed(1)} / ${baseline.gamma.toFixed(1)}`;
+});
+
+/* -----------------------
+   CSV export
+   ----------------------- */
+function exportCSV(list){
+  if(!list || list.length === 0){ alert('No data to export'); return; }
+  // headers as per master prompt
+  const rows = [];
+  rows.push(['timestamp_ms','acc_x','acc_y','acc_z','g','rot_alpha','rot_beta','rot_gamma','orient_alpha','orient_beta','orient_gamma'].join(','));
+  list.forEach(p=>{
+    const row = [
+      p.t,
+      p.ax.toFixed(6),
+      p.ay.toFixed(6),
+      p.az.toFixed(6),
+      p.g.toFixed(6),
+      (p.rAlpha ?? 0).toFixed(6),
+      (p.rBeta ?? 0).toFixed(6),
+      (p.rGamma ?? 0).toFixed(6),
+      (p.oAlpha ?? 0).toFixed(6),
+      (p.oBeta ?? 0).toFixed(6),
+      (p.oGamma ?? 0).toFixed(6)
+    ].join(',');
+    rows.push(row);
+  });
+  const blob = new Blob([rows.join('\n')], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().replace(/[:.]/g,'-');
+  a.href = url;
+  a.download = `motion_log_${ts}.csv`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  URL.revokeObjectURL(url);
+  a.remove();
+}
+
+/* -----------------------
+   Init & auto-start if possible
+   ----------------------- */
+(function init(){
+  // If DeviceMotionEvent exists, try to start passively (Android browsers often allow it)
+  if (window.DeviceMotionEvent){
+    try { startSensors(); refs.btnPerm.style.display = (typeof DeviceMotionEvent.requestPermission === 'function') ? 'inline-block' : 'none'; }
+    catch(e){ console.warn('startSensors fallback', e); }
+  } else {
+    alert('DeviceMotionEvent not supported on this device/browser.');
+  }
+  // set initial visibility
+  refs.accelGraphWrap.style.display = '';
+  refs.rotGraphWrap.style.display = '';
+  // ensure canvases sized
+  setTimeout(()=>{ resizeGraphCanvases(); }, 200);
+})();
+</script>
+</body>
+</html>
