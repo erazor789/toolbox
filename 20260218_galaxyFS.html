@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>GalaxyFS — 3D Drive Galaxy</title>
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: black;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  #ui {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 10;
+    background: rgba(0,0,0,0.65);
+    padding: 10px 14px;
+    border-radius: 8px;
+    color: #fff;
+    backdrop-filter: blur(6px);
+  }
+
+  #ui button {
+    background: #4dabf7;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  #stats {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #aaa;
+  }
+
+  .label {
+    position: absolute;
+    color: white;
+    font-size: 11px;
+    pointer-events: none;
+    white-space: nowrap;
+    text-shadow: 0 0 6px black;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="ui">
+  <button id="pick">Select Folder / Drive</button>
+  <div id="stats">No folder selected.</div>
+</div>
+
+<script type="module">
+
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+
+let scene, camera, renderer, controls;
+let labels = [];
+let totalSize = 0;
+
+init();
+animate();
+
+function init() {
+  scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x000000, 0.00035);
+
+  camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 200000);
+  camera.position.set(0, 300, 800);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+  sun.position.set(200, 300, 400);
+  scene.add(sun);
+
+  window.addEventListener("resize", onResize);
+  document.getElementById("pick").onclick = pickFolder;
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+async function pickFolder() {
+  clearScene();
+  const handle = await window.showDirectoryPicker();
+  document.getElementById("stats").innerText = "Scanning filesystem...";
+
+  totalSize = 0;
+  const tree = await scanDir(handle, 0);
+
+  document.getElementById("stats").innerText =
+    `Total Size: ${(totalSize / 1e9).toFixed(2)} GB`;
+
+  buildGalaxy(tree, 0, 0, 0, 420);
+}
+
+async function scanDir(handle, depth) {
+  let size = 0;
+  const children = [];
+
+  for await (const entry of handle.values()) {
+    if (entry.kind === "file") {
+      const file = await entry.getFile();
+      size += file.size;
+    } else {
+      const child = await scanDir(entry, depth + 1);
+      size += child.size;
+      children.push(child);
+    }
+  }
+
+  totalSize += size;
+
+  return {
+    name: handle.name,
+    size,
+    depth,
+    children
+  };
+}
+
+function buildGalaxy(node, x, y, z, spread) {
+  const radius = Math.max(2.5, Math.log10(node.size + 1) * 6);
+
+  const mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(radius, 20, 20),
+    new THREE.MeshStandardMaterial({
+      color: colorByDepth(node.depth),
+      emissive: colorByDepth(node.depth),
+      emissiveIntensity: 0.4
+    })
+  );
+
+  mesh.position.set(x, y, z);
+  scene.add(mesh);
+
+  createLabel(node.name, mesh.position);
+
+  const angleStep = (Math.PI * 2) / Math.max(1, node.children.length);
+
+  node.children.forEach((child, i) => {
+    const angle = i * angleStep;
+    const r = spread + Math.random() * spread * 0.5;
+
+    const cx = x + Math.cos(angle) * r;
+    const cz = z + Math.sin(angle) * r;
+    const cy = y + (Math.random() - 0.5) * spread * 0.4;
+
+    const line = makeLine(x, y, z, cx, cy, cz);
+    scene.add(line);
+
+    buildGalaxy(child, cx, cy, cz, spread * 0.6);
+  });
+}
+
+function makeLine(x1, y1, z1, x2, y2, z2) {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(x1, y1, z1),
+    new THREE.Vector3(x2, y2, z2)
+  ]);
+
+  return new THREE.Line(
+    geo,
+    new THREE.LineBasicMaterial({ color: 0x4488ff, opacity: 0.18, transparent: true })
+  );
+}
+
+function createLabel(text, position) {
+  const div = document.createElement("div");
+  div.className = "label";
+  div.innerText = text;
+  document.body.appendChild(div);
+  labels.push({ element: div, position });
+}
+
+function colorByDepth(depth) {
+  const colors = [0x4dabf7, 0x63e6be, 0xffd43b, 0xff6b6b, 0x9775fa];
+  return colors[depth % colors.length];
+}
+
+function updateLabels() {
+  labels.forEach(label => {
+    const vector = label.position.clone().project(camera);
+
+    const x = (vector.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (-vector.y * 0.5 + 0.5) * window.innerHeight;
+
+    label.element.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
+    label.element.style.display = vector.z < 1 ? "block" : "none";
+  });
+}
+
+function clearScene() {
+  while (scene.children.length > 0) {
+    scene.remove(scene.children[0]);
+  }
+
+  labels.forEach(l => l.element.remove());
+  labels.length = 0;
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  updateLabels();
+  renderer.render(scene, camera);
+}
+
+</script>
+</body>
+</html>
