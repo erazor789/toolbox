@@ -2,22 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>FileMindMap2D — Browser 2D Mindmap</title>
+<title>FileMindMap2D — Drag & Drop Folder</title>
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, sans-serif; overflow: hidden; background: #111; }
   #ui { position: fixed; top: 12px; left: 12px; z-index: 10; background: rgba(0,0,0,0.65); padding: 10px 14px; border-radius: 8px; color: #fff; backdrop-filter: blur(6px); }
-  #pick { background: #4dabf7; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; color: white; font-weight: 600; }
-  #stats { margin-top: 6px; font-size: 12px; color: #aaa; }
+  #dropzone { border: 2px dashed #4dabf7; padding: 10px; cursor: pointer; width: 220px; text-align: center; margin-bottom: 6px; }
+  #stats { font-size: 12px; color: #aaa; }
   canvas { display: block; }
-  .node { cursor: pointer; }
 </style>
 </head>
 <body>
 
 <div id="ui">
-  <input type="file" id="pick" webkitdirectory multiple>
+  <div id="dropzone">Drop folder here or click to select</div>
+  <input type="file" id="pick" webkitdirectory multiple style="display:none;">
   <div id="stats">No folder selected.</div>
 </div>
+
 <canvas id="canvas"></canvas>
 
 <script>
@@ -32,28 +33,38 @@ window.addEventListener('resize', () => {
   draw();
 });
 
-// Globals
 let rootNode = null;
 let panX = width/2, panY = 50;
 let nodeSpacingY = 50;
 let nodeSpacingX = 20;
 
-// Handle file input
-document.getElementById('pick').addEventListener('change', handleFiles);
+// Drag-and-drop support
+const dropzone = document.getElementById('dropzone');
+const picker = document.getElementById('pick');
+
+dropzone.addEventListener('click', () => picker.click());
+dropzone.addEventListener('dragover', e => e.preventDefault());
+dropzone.addEventListener('drop', e => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer.files);
+  handleFiles({ target: { files } });
+});
+
+// Fallback file picker
+picker.addEventListener('change', handleFiles);
 
 function handleFiles(event) {
   const files = Array.from(event.target.files);
-  if (files.length === 0) return;
+  if (!files.length) return;
 
-  // Build tree
   rootNode = { name: "Root", size: 0, children: {}, expanded: true };
+
   files.forEach(file => {
     const parts = file.webkitRelativePath.split('/');
     let current = rootNode;
     for (let i=0; i<parts.length; i++) {
       const part = parts[i];
       if (i === parts.length - 1) {
-        // File
         if (!current.children['_files']) current.children['_files'] = [];
         current.children['_files'].push({ name: part, size: file.size });
         current.size += file.size;
@@ -77,26 +88,21 @@ function handleFiles(event) {
   draw();
 }
 
-// Draw mindmap recursively
-function drawNode(node, x, y, ctx) {
-  ctx.fillStyle = '#4dabf7';
-  ctx.strokeStyle = '#888';
-  ctx.lineWidth = 1;
+// Draw mindmap
+function drawNode(node, x, y) {
   ctx.font = "14px sans-serif";
-
   const text = `${node.name} (${(node.size/1e6).toFixed(2)} MB)`;
   const textWidth = ctx.measureText(text).width;
 
-  // Node rectangle
+  // Node box
   ctx.fillStyle = '#222';
-  ctx.fillRect(x - 5, y - 12, textWidth + 10, 20);
+  ctx.fillRect(x-5, y-12, textWidth+10, 20);
   ctx.strokeStyle = '#4dabf7';
-  ctx.strokeRect(x - 5, y - 12, textWidth + 10, 20);
-
+  ctx.strokeRect(x-5, y-12, textWidth+10, 20);
   ctx.fillStyle = '#fff';
   ctx.fillText(text, x, y);
 
-  // Children
+  // Draw children
   if (!node.expanded) return;
 
   let childY = y + nodeSpacingY;
@@ -108,7 +114,7 @@ function drawNode(node, x, y, ctx) {
     ctx.moveTo(x, y + 5);
     ctx.lineTo(childX, childY - 12);
     ctx.stroke();
-    drawNode(c, childX, childY, ctx);
+    drawNode(c, childX, childY);
     childX += nodeSpacingX;
   });
 
@@ -119,23 +125,21 @@ function drawNode(node, x, y, ctx) {
       ctx.moveTo(x, y + 5);
       ctx.lineTo(childX, childY - 12);
       ctx.stroke();
-      drawNode(f, childX, childY, ctx);
+      drawNode(f, childX, childY);
       childX += nodeSpacingX;
     });
   }
 }
 
-// Main draw
 function draw() {
   ctx.clearRect(0, 0, width, height);
-  if (rootNode) drawNode(rootNode, panX, panY, ctx);
+  if (rootNode) drawNode(rootNode, panX, panY);
 }
 
-// Optional: click to expand/collapse
+// Click to expand/collapse
 canvas.addEventListener('click', e => {
   if (!rootNode) return;
-  const mx = e.offsetX;
-  const my = e.offsetY;
+  const mx = e.offsetX, my = e.offsetY;
 
   function toggleNode(node, x, y) {
     ctx.font = "14px sans-serif";
