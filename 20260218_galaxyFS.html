@@ -2,13 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>GalaxyFS — 3D Drive Galaxy (GitHub Pages)</title>
+<title>FileMindMap2D — Browser 2D Mindmap</title>
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: black; font-family: system-ui, sans-serif; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, sans-serif; overflow: hidden; background: #111; }
   #ui { position: fixed; top: 12px; left: 12px; z-index: 10; background: rgba(0,0,0,0.65); padding: 10px 14px; border-radius: 8px; color: #fff; backdrop-filter: blur(6px); }
-  #ui input { background: #4dabf7; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; color: white; font-weight: 600; }
+  #pick { background: #4dabf7; border: none; border-radius: 6px; padding: 8px 12px; cursor: pointer; color: white; font-weight: 600; }
   #stats { margin-top: 6px; font-size: 12px; color: #aaa; }
-  .label { position: absolute; color: white; font-size: 11px; pointer-events: none; white-space: nowrap; text-shadow: 0 0 6px black; }
+  canvas { display: block; }
+  .node { cursor: pointer; }
 </style>
 </head>
 <body>
@@ -17,57 +18,38 @@
   <input type="file" id="pick" webkitdirectory multiple>
   <div id="stats">No folder selected.</div>
 </div>
+<canvas id="canvas"></canvas>
 
-<script type="module">
-import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
-import { OrbitControls } from "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js";
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let width = canvas.width = window.innerWidth;
+let height = canvas.height = window.innerHeight;
 
-let scene, camera, renderer, controls;
-let labels = [];
-let totalSize = 0;
+window.addEventListener('resize', () => {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+  draw();
+});
 
-init();
-animate();
+// Globals
+let rootNode = null;
+let panX = width/2, panY = 50;
+let nodeSpacingY = 50;
+let nodeSpacingX = 20;
 
-function init() {
-  scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x000000, 0.00035);
-
-  camera = new THREE.PerspectiveCamera(65, window.innerWidth/window.innerHeight, 0.1, 200000);
-  camera.position.set(0, 300, 800);
-
-  renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  document.body.appendChild(renderer.domElement);
-
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-
-  scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-  const sun = new THREE.DirectionalLight(0xffffff, 0.9);
-  sun.position.set(200, 300, 400);
-  scene.add(sun);
-
-  window.addEventListener("resize", () => {
-    camera.aspect = window.innerWidth/window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  document.getElementById("pick").addEventListener("change", handleFiles);
-}
+// Handle file input
+document.getElementById('pick').addEventListener('change', handleFiles);
 
 function handleFiles(event) {
-  clearScene();
   const files = Array.from(event.target.files);
   if (files.length === 0) return;
 
-  // Build folder tree from file paths
-  const root = { name: "Root", size: 0, depth: 0, children: {} };
+  // Build tree
+  rootNode = { name: "Root", size: 0, children: {}, expanded: true };
   files.forEach(file => {
     const parts = file.webkitRelativePath.split('/');
-    let current = root;
+    let current = rootNode;
     for (let i=0; i<parts.length; i++) {
       const part = parts[i];
       if (i === parts.length - 1) {
@@ -76,102 +58,116 @@ function handleFiles(event) {
         current.children['_files'].push({ name: part, size: file.size });
         current.size += file.size;
       } else {
-        // Folder
-        if (!current.children[part]) current.children[part] = { name: part, size: 0, depth: current.depth+1, children: {} };
+        if (!current.children[part]) current.children[part] = { name: part, size: 0, children: {}, expanded: true };
         current = current.children[part];
       }
     }
   });
 
-  // Compute total sizes recursively
+  // Compute folder sizes recursively
   function sumSizes(node) {
     if (node.children['_files']) node.children['_files'].forEach(f => node.size += f.size);
     Object.values(node.children).forEach(c => { if (c.name) node.size += sumSizes(c); });
     return node.size;
   }
-  sumSizes(root);
-  totalSize = root.size;
+  sumSizes(rootNode);
 
-  document.getElementById("stats").innerText = `Total Size: ${(totalSize/1e9).toFixed(2)} GB`;
+  document.getElementById('stats').innerText = `Total Size: ${(rootNode.size/1e9).toFixed(2)} GB`;
 
-  // Convert children objects to arrays for easier layout
-  function convertChildren(node) {
-    node.childrenArray = [];
-    Object.values(node.children).forEach(c => { if (c.name) { convertChildren(c); node.childrenArray.push(c); } });
-    if (node.children['_files']) {
-      node.children['_files'].forEach(f => { node.childrenArray.push({ name: f.name, size: f.size, depth: node.depth+1, childrenArray: [] }); });
-    }
+  draw();
+}
+
+// Draw mindmap recursively
+function drawNode(node, x, y, ctx) {
+  ctx.fillStyle = '#4dabf7';
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1;
+  ctx.font = "14px sans-serif";
+
+  const text = `${node.name} (${(node.size/1e6).toFixed(2)} MB)`;
+  const textWidth = ctx.measureText(text).width;
+
+  // Node rectangle
+  ctx.fillStyle = '#222';
+  ctx.fillRect(x - 5, y - 12, textWidth + 10, 20);
+  ctx.strokeStyle = '#4dabf7';
+  ctx.strokeRect(x - 5, y - 12, textWidth + 10, 20);
+
+  ctx.fillStyle = '#fff';
+  ctx.fillText(text, x, y);
+
+  // Children
+  if (!node.expanded) return;
+
+  let childY = y + nodeSpacingY;
+  let childX = x - (Object.keys(node.children).length*nodeSpacingX)/2;
+
+  Object.values(node.children).forEach(c => {
+    ctx.strokeStyle = '#888';
+    ctx.beginPath();
+    ctx.moveTo(x, y + 5);
+    ctx.lineTo(childX, childY - 12);
+    ctx.stroke();
+    drawNode(c, childX, childY, ctx);
+    childX += nodeSpacingX;
+  });
+
+  if (node.children['_files']) {
+    node.children['_files'].forEach(f => {
+      ctx.strokeStyle = '#888';
+      ctx.beginPath();
+      ctx.moveTo(x, y + 5);
+      ctx.lineTo(childX, childY - 12);
+      ctx.stroke();
+      drawNode(f, childX, childY, ctx);
+      childX += nodeSpacingX;
+    });
   }
-  convertChildren(root);
-
-  buildGalaxy(root, 0,0,0,420);
 }
 
-function buildGalaxy(node, x, y, z, spread) {
-  const radius = Math.max(2.5, Math.log10(node.size + 1) * 6);
-  const mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(radius, 20, 20),
-    new THREE.MeshStandardMaterial({ color: colorByDepth(node.depth), emissive: colorByDepth(node.depth), emissiveIntensity: 0.4 })
-  );
-  mesh.position.set(x,y,z);
-  scene.add(mesh);
-  createLabel(node.name, mesh.position);
-
-  const angleStep = (Math.PI*2)/Math.max(1, node.childrenArray.length);
-  node.childrenArray.forEach((child,i)=>{
-    const angle = i*angleStep;
-    const r = spread + Math.random()*spread*0.5;
-    const cx = x + Math.cos(angle)*r;
-    const cz = z + Math.sin(angle)*r;
-    const cy = y + (Math.random()-0.5)*spread*0.4;
-
-    const line = makeLine(x,y,z,cx,cy,cz);
-    scene.add(line);
-
-    buildGalaxy(child, cx,cy,cz,spread*0.6);
-  });
+// Main draw
+function draw() {
+  ctx.clearRect(0, 0, width, height);
+  if (rootNode) drawNode(rootNode, panX, panY, ctx);
 }
 
-function makeLine(x1,y1,z1,x2,y2,z2) {
-  const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x1,y1,z1), new THREE.Vector3(x2,y2,z2)]);
-  return new THREE.Line(geo, new THREE.LineBasicMaterial({ color:0x4488ff, opacity:0.18, transparent:true }));
-}
+// Optional: click to expand/collapse
+canvas.addEventListener('click', e => {
+  if (!rootNode) return;
+  const mx = e.offsetX;
+  const my = e.offsetY;
 
-function createLabel(text, position) {
-  const div = document.createElement("div");
-  div.className = "label";
-  div.innerText = text;
-  document.body.appendChild(div);
-  labels.push({ element: div, position });
-}
+  function toggleNode(node, x, y) {
+    ctx.font = "14px sans-serif";
+    const text = `${node.name} (${(node.size/1e6).toFixed(2)} MB)`;
+    const textWidth = ctx.measureText(text).width;
+    const rect = {x: x-5, y: y-12, w: textWidth+10, h: 20};
 
-function colorByDepth(depth) {
-  const colors = [0x4dabf7, 0x63e6be, 0xffd43b, 0xff6b6b, 0x9775fa];
-  return colors[depth % colors.length];
-}
+    if (mx >= rect.x && mx <= rect.x+rect.w && my >= rect.y && my <= rect.y+rect.h) {
+      node.expanded = !node.expanded;
+      draw();
+      return true;
+    }
 
-function updateLabels() {
-  labels.forEach(label => {
-    const vector = label.position.clone().project(camera);
-    const x = (vector.x*0.5+0.5)*window.innerWidth;
-    const y = (-vector.y*0.5+0.5)*window.innerHeight;
-    label.element.style.transform = `translate(-50%, -50%) translate(${x}px, ${y}px)`;
-    label.element.style.display = vector.z<1 ? "block":"none";
-  });
-}
+    if (node.expanded) {
+      let childY = y + nodeSpacingY;
+      let childX = x - (Object.keys(node.children).length*nodeSpacingX)/2;
+      for (let c of Object.values(node.children)) {
+        if (toggleNode(c, childX, childY)) return true;
+        childX += nodeSpacingX;
+      }
+      if (node.children['_files']) {
+        for (let f of node.children['_files']) {
+          if (toggleNode(f, childX, childY)) return true;
+          childX += nodeSpacingX;
+        }
+      }
+    }
+    return false;
+  }
 
-function clearScene() {
-  while(scene.children.length>0){scene.remove(scene.children[0]);}
-  labels.forEach(l=>l.element.remove());
-  labels.length=0;
-}
-
-function animate() {
-  requestAnimationFrame(animate);
-  controls.update();
-  updateLabels();
-  renderer.render(scene,camera);
-}
+  toggleNode(rootNode, panX, panY);
+});
 </script>
 </body>
 </html>
