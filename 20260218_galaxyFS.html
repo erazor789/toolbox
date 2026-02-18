@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>FileMindMap2D — Drag & Drop Folder</title>
+<title>FileMindMap2D — GitHub Pages Ready</title>
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, sans-serif; overflow: hidden; background: #111; }
   #ui { position: fixed; top: 12px; left: 12px; z-index: 10; background: rgba(0,0,0,0.65); padding: 10px 14px; border-radius: 8px; color: #fff; backdrop-filter: blur(6px); }
@@ -36,7 +36,7 @@ window.addEventListener('resize', () => {
 let rootNode = null;
 let panX = width/2, panY = 50;
 let nodeSpacingY = 50;
-let nodeSpacingX = 20;
+let nodeSpacingX = 100; // wider spacing to reduce overlap
 
 // Drag-and-drop support
 const dropzone = document.getElementById('dropzone');
@@ -60,14 +60,16 @@ function handleFiles(event) {
   rootNode = { name: "Root", size: 0, children: {}, expanded: true };
 
   files.forEach(file => {
-    const parts = file.webkitRelativePath.split('/');
+    const pathParts = file.webkitRelativePath ? file.webkitRelativePath.split('/') : [file.name];
     let current = rootNode;
-    for (let i=0; i<parts.length; i++) {
-      const part = parts[i];
-      if (i === parts.length - 1) {
+    for (let i=0; i<pathParts.length; i++) {
+      const part = pathParts[i];
+      if (i === pathParts.length - 1) {
+        // File node
         if (!current.children['_files']) current.children['_files'] = [];
-        current.children['_files'].push({ name: part, size: file.size });
-        current.size += file.size;
+        const size = file.size || 0;
+        current.children['_files'].push({ name: part, size });
+        current.size += size;
       } else {
         if (!current.children[part]) current.children[part] = { name: part, size: 0, children: {}, expanded: true };
         current = current.children[part];
@@ -88,13 +90,14 @@ function handleFiles(event) {
   draw();
 }
 
-// Draw mindmap
+// Draw mindmap recursively
 function drawNode(node, x, y) {
   ctx.font = "14px sans-serif";
-  const text = `${node.name} (${(node.size/1e6).toFixed(2)} MB)`;
+  const sizeText = node.size ? ` (${(node.size/1e6).toFixed(2)} MB)` : '';
+  const text = node.name + sizeText;
   const textWidth = ctx.measureText(text).width;
 
-  // Node box
+  // Node rectangle
   ctx.fillStyle = '#222';
   ctx.fillRect(x-5, y-12, textWidth+10, 20);
   ctx.strokeStyle = '#4dabf7';
@@ -102,35 +105,32 @@ function drawNode(node, x, y) {
   ctx.fillStyle = '#fff';
   ctx.fillText(text, x, y);
 
-  // Draw children
+  // Children
   if (!node.expanded) return;
 
-  let childY = y + nodeSpacingY;
-  let childX = x - (Object.keys(node.children).length*nodeSpacingX)/2;
+  let children = Object.values(node.children);
+  if (node.children['_files']) children = children.concat(node.children['_files']);
 
-  Object.values(node.children).forEach(c => {
+  let startX = x - ((children.length-1) * nodeSpacingX) / 2;
+
+  children.forEach(child => {
+    const childY = y + nodeSpacingY;
+    const childX = startX;
+
+    // Draw connecting line
     ctx.strokeStyle = '#888';
     ctx.beginPath();
     ctx.moveTo(x, y + 5);
     ctx.lineTo(childX, childY - 12);
     ctx.stroke();
-    drawNode(c, childX, childY);
-    childX += nodeSpacingX;
-  });
 
-  if (node.children['_files']) {
-    node.children['_files'].forEach(f => {
-      ctx.strokeStyle = '#888';
-      ctx.beginPath();
-      ctx.moveTo(x, y + 5);
-      ctx.lineTo(childX, childY - 12);
-      ctx.stroke();
-      drawNode(f, childX, childY);
-      childX += nodeSpacingX;
-    });
-  }
+    drawNode(child, childX, childY);
+
+    startX += nodeSpacingX;
+  });
 }
 
+// Draw entire canvas
 function draw() {
   ctx.clearRect(0, 0, width, height);
   if (rootNode) drawNode(rootNode, panX, panY);
@@ -143,7 +143,8 @@ canvas.addEventListener('click', e => {
 
   function toggleNode(node, x, y) {
     ctx.font = "14px sans-serif";
-    const text = `${node.name} (${(node.size/1e6).toFixed(2)} MB)`;
+    const sizeText = node.size ? ` (${(node.size/1e6).toFixed(2)} MB)` : '';
+    const text = node.name + sizeText;
     const textWidth = ctx.measureText(text).width;
     const rect = {x: x-5, y: y-12, w: textWidth+10, h: 20};
 
@@ -154,17 +155,15 @@ canvas.addEventListener('click', e => {
     }
 
     if (node.expanded) {
-      let childY = y + nodeSpacingY;
-      let childX = x - (Object.keys(node.children).length*nodeSpacingX)/2;
-      for (let c of Object.values(node.children)) {
-        if (toggleNode(c, childX, childY)) return true;
-        childX += nodeSpacingX;
-      }
-      if (node.children['_files']) {
-        for (let f of node.children['_files']) {
-          if (toggleNode(f, childX, childY)) return true;
-          childX += nodeSpacingX;
-        }
+      let children = Object.values(node.children);
+      if (node.children['_files']) children = children.concat(node.children['_files']);
+
+      let startX = x - ((children.length-1) * nodeSpacingX) / 2;
+      for (let child of children) {
+        const childY = y + nodeSpacingY;
+        const childX = startX;
+        if (toggleNode(child, childX, childY)) return true;
+        startX += nodeSpacingX;
       }
     }
     return false;
